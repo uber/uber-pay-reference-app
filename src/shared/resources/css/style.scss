@@ -1,0 +1,216 @@
+/* embrace uber styling */
+// Initials
+@import "variables";
+@import "utils/fonts";
+
+// Core components
+@import "layout/columns";
+
+// Extensions
+// none.
+
+html, body {
+    font-family: 'Uber Move' 'Helvetica Neue';
+    margin: 0px;
+    padding: 0px;
+}
+
+.header {
+    width: 100%;
+    background-color: $color-black;
+    padding: 10px 20px;
+
+    &.large {
+        font-size: 24px;
+    }
+}
+.header-logo {
+    margin: 0 6px;
+    font-weight: normal;
+    color: white;
+    font-size: $font-large;
+}
+.header-decorator {
+    font-weight: 100;
+    color:white;
+    font-size: $font-large;
+}
+
+.code, pre, blockquote, textarea {
+    width: 100%;
+    margin: 10px;
+    padding: 10px;
+    background-color: $color-grey;
+    border-radius: 4px;
+    font-size: $font-small;
+    font-family: 'Hack' 'Courier New';
+    text-align: left;
+}
+.form {
+    margin: $gap * 2;
+}
+
+.button {
+    background-color: $color-black;
+    color: $color-white;
+
+    padding: $gap * 2;
+    
+    font-size: $font-small;
+    border-radius: 1px;
+
+    @media screen and (max-width: 1024px) {
+        width: 100%;
+    }
+
+    &.light {
+        background-color: white;
+        color: $color-black;
+
+        &.outline {
+            background-color: transparent;
+            color: white;
+        }
+        &.outline:hover {
+            color: $color-black;
+        }
+    }
+
+    &.outline {
+        background-color: transparent;
+        color: $color-black;
+    }
+    &.outline:hover {
+        color: white;
+    }
+
+    &.smooth {
+        transition: 0.2s;
+    }
+
+    &.small {
+        width: 1rem;
+        height: 1rem;
+        padding: $gap;
+        font-size: $font-small;
+        border-radius: $gap;
+    }
+
+    &.round {
+        border-radius: 100%;
+    }
+}
+.button:hover {
+    background-color: $color-grey;
+    color:black;
+}
+
+p, a {
+    &.light {
+        font-weight: 100;
+    }
+
+    &.small {
+        font-size: 10px;
+        color: #2a2a2a;
+    }
+
+    &.is-left {
+        text-align: left;
+    }
+}
+
+.hidden { 
+    transform: scale(1, 0);
+    color: transparent;
+    display: none;
+}
+
+.is-error {
+    background-color: $color-danger;
+    color: white;
+}
+
+.is-success {
+    background-color: $color-success;
+    color: white;
+}
+
+.columns {
+    display: flex;
+    flex-direction: row;
+    &.centered {
+        align-items: center;
+    }
+}
+
+.column {
+    display: block;
+    flex-basis: 0;
+    flex-grow: 1;
+    flex-shrink: 1;
+    padding-right: $gap;
+
+    &.is-right {
+        text-align: right;
+    }
+
+    &.is-left {
+        text-align: left;
+    }
+}
+
+.block {
+    transform-origin:top;
+
+    display: block;
+    width: 100%;
+
+    &.large {
+        height: 80vh;
+    }
+    &.small {
+        padding: $gap / 5;
+        margin: auto;
+    }
+
+    &.dark {
+        background-color: $color-black;
+    }
+
+    &.centered {
+        vertical-align: center;
+    }
+}
+
+.offset-up {
+    overflow: hidden;
+    margin-top: -50vh;
+    margin-bottom: 100vh;
+    background-color: white;
+    padding: 20px;
+    padding-bottom: 40vh;
+    border-radius: 8px;
+}
+
+.md50 {
+    padding-top: 50px;
+}
+
+input, select {
+    display: block;
+    margin: $gap;
+    padding: $gap * 0.25;
+    border-radius: 0;
+    border: 1px solid transparent;
+    width: 10rem;
+    height: 1.5rem;
+    background-color: $color-grey;
+
+    @media screen and (max-width: 1024px) {
+        width: 100%;
+    }
+}
+input:focus,select:focus {
+    outline: $color-white 1px solid;
+}

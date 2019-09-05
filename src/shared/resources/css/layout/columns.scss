@@ -1,0 +1,11 @@
+.container {
+    flex-grow: 1;
+    margin: 0 auto;
+    position: relative;
+    width: auto; 
+    max-width: 80vw;
+
+    &.centered {
+        text-align: center;
+    }
+}
