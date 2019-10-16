@@ -7,6 +7,7 @@ const axios = require('axios');
 // TODO (Mike): Reformat this for test tendencies and move these requests to a mock client.
 class UberPaymentsClient {
     constructor(oauth) {
+        console.log(oauth);
         this.oauthPacket = oauth;
     }
 

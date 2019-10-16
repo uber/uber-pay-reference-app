@@ -97,7 +97,7 @@ function mapFormToJSON() {
     session_id: getParamString('DeviceSessionId'),
     funding_method: getParamString("Funding_Method"),
     initiated_at: new Date(),
-    return_url: "http://localhost/payments/ok"
+    return_url: "http://localhost:8080/payments/ok"
   };
 } 
 

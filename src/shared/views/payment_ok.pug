@@ -1,0 +1,22 @@
+extends components/layout
+
+block scripts
+    script(src="/resources/js/script.js")
+
+block header
+    include components/header_big
+
+block content
+    .block.large.dark
+    .container.offset-up
+        .form
+            .columns.centered
+                .column
+                    h2 Uber
+                    p(style="font-weight: 100;") 
+                        | Thank you for topping up!
+                    <br>
+                    h3 Response
+                    if confirmRes != null
+                        pre https://api-sandbox.uber.com/v1/payments/deposits/#{confirmRes.deposit.id}/confirm
+                        textarea.code=JSON.stringify(confirmRes, null, 2)            

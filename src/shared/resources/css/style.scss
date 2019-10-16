@@ -1,16 +1,14 @@
-/* embrace uber styling */
+/* Embrace uber styling */
+
 // Initials
-@import "variables";
-@import "utils/fonts";
+@import "core/variables";
 
-// Core components
+// Components
 @import "layout/columns";
-
-// Extensions
-// none.
+@import "utils/fonts.scss";
 
 html, body {
-    font-family: 'Uber Move' 'Helvetica Neue';
+    font-family: 'Uber Move Text' 'Helvetica Neue';
     margin: 0px;
     padding: 0px;
 }
@@ -19,6 +17,7 @@ html, body {
     width: 100%;
     background-color: $color-black;
     padding: 10px 20px;
+    font-family: $f-uber-head;
 
     &.large {
         font-size: 24px;
@@ -43,7 +42,7 @@ html, body {
     background-color: $color-grey;
     border-radius: 4px;
     font-size: $font-small;
-    font-family: 'Hack' 'Courier New';
+    font-family: $f-monospace 'Courier New';
     text-align: left;
 }
 .form {

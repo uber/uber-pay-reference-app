@@ -2,7 +2,9 @@ const Router    = require('express').Router();
 const axios     = require("axios");
 const crypto    = require("crypto");
 
-const privateKey = process.env.UBER_PRIV_KEY;
+const privateKey = JSON.parse("\"" + process.env.UBER_PRIV_KEY + "\"");
+// Address to the merchant app.
+const host = "127.0.0.1:8080";
 
 Router.get("/", (req, res) => {
     return res.render("index");
@@ -13,14 +15,15 @@ Router.post("/init-deposit", async (req, res) => {
     let digest = createDigest(req.rawBody);
     let date = new Date();
 
-    let signature = await createSignature(date, digest);
+    let signature = await createSignature(date, host, digest);
     if (signature == null) {
       console.error("Signature creation failed.");
       return
     }
 
     let response = await axios({
-        url: "http://127.0.0.1:8080/v1/init-deposit",
+        // TODO: turn this into endpoint
+        url: `http://${host}/v1/init-deposit`,
         method: "POST",
         data: req.body,
         headers: {
@@ -53,21 +56,29 @@ function createDigest(body) {
     return "SHA-256=" + digest.toString("base64");
 }
 
-async function createSignature(date, digest) {
+async function createSignature(date, host, digest) {
     const newline = "\n";
     
+    if(privateKey == null 
+        || privateKey.length == 0) {
+        throw "Private key is not set up in .env file. Please enter your private key and restart this app.";
+    }
+
     // Start building the signature headers
     let signature = "";
     signature += "keyId=\"key-rsa-1\",";
     signature += "algorithm=\"rsa-sha256\",";
-    signature += "headers=\"(request-target) date digest\",";
+    signature += "headers=\"(request-target) host date digest\",";
 
     // Start building the payload
     let payload = "";
-    payload += "(request-target): POST /v1/init-deposit" + newline;
+    payload += "(request-target): post /v1/init-deposit" + newline;
+    payload += "host:" + " " + host + newline;
     payload += "date:" + " " + date.toUTCString() + newline;
-    payload += "digest:" + " " + digest + newline;
-  
+    payload += "digest:" + " " + digest;
+
+    console.log(payload);
+
     // Sign the signature with sha256 as hashing algorithm
     let signedPayload = await crypto.createSign("sha256")
     // Hash the payload built above
@@ -76,7 +87,7 @@ async function createSignature(date, digest) {
             // Use your Private key to sign it
             key: privateKey,
             // Uber uses RSA-RSS, so make sure to set padding to such.
-            padding: crypto.constants.RSA_PKCS1_PSS_PADDING
+            padding: crypto.constants.RSA_PKCS1_PADDING
         });
   
     // Encode the signed payload to a base64 string

@@ -10,5 +10,6 @@ This application is used to demo, test, and communicate the flow of the uber pay
 2. install Yarn.
     - `brew install yarn`
 3. run `yarn` to install dependencies.
-4. run `node api/index` to run the development environment.
-5. open `./app/public/index.html` through Chrome or your preferred browser.
+4. copy `.example.env` to `.env` and fill in the configuration properties with your own values.
+5. run `npm run start` to run the development environment.
+6. open `./app/public/index.html` through Chrome or your preferred browser.

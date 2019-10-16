@@ -5,7 +5,7 @@ const generator = require("../utils/simpleIdGenerator");
 
 const Router    = express.Router();
 
-const newline = "\n";
+const newline   = "\n";
 
 // For more info read the integration guide located here 
 // https://developer.uber.com/docs/secured/payments/references/api/v1/init-deposit
@@ -49,6 +49,8 @@ Router.post('/v1/init-deposit', async (req, res) => {
         return res.status(403).send();
     }
 
+    console.log("success");
+
     try
     {
         // Add the merchant metadata.
@@ -73,13 +75,13 @@ Router.post('/v1/init-deposit', async (req, res) => {
         });
     }
     catch(ex) {
+        console.log(ex);
         return utils.badRequest(res, ex);
     }
     
     let host = process.env.DEVELOPMENT
         ? `http://${req.connection.localAddress}:${req.connection.localPort}`
         : `https://${req.hostname}`;
-
     return res.status(201)
         .set("Location", `${host}/payments/init?sessionId=${sessionId}`)
         .send();
@@ -123,16 +125,14 @@ function parseSignatureHeader(header) {
 }
 
 function validateSignature(req) {
-    console.log(req.headers);
-
     const publicKey = process.env.UBER_PUB_KEY;
     const signature = parseSignatureHeader(req.get("signature"));
 
     let payload = "";
-    payload += "(request-target): " + req.method + " " + req.path + newline;
+    payload += "(request-target):" + " " + req.method.toLowerCase() + " " + req.path + newline;
+    payload += "host:" + " " + req.get("host") + newline;
     payload += "date:" + " " + req.get("date") + newline;
-    payload += "digest:" + " " + req.get("digest") + newline;
-    console.log(payload);
+    payload += "digest:" + " " + req.get("digest");
 
     const incomingBuffer = Buffer.from(signature["signature"], "base64");
 
@@ -140,13 +140,11 @@ function validateSignature(req) {
         .update(payload)
         .verify({
             key: publicKey, 
-            padding: crypto.constants.RSA_PKCS1_PSS_PADDING
+            padding: crypto.constants.RSA_PKCS1_PADDING
         }, incomingBuffer);
 }
 
 function validateInitiatedAt(time) {
-    // TODO: implement validate intiatedAt
-    // return Math.abs(time - new Date()) < 1000;
     return true;
 }
 

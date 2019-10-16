@@ -10,9 +10,6 @@ const port = 80;
 
 dotenv.config();
 
-// fix for newlines in dotenv: https://github.com/motdotla/dotenv/issues/218
-process.env.UBER_PRIV_KEY = JSON.parse(`"${process.env.UBER_PRIV_KEY}"`);
-
 async function main() {
     // -- Middleware
     app.use("/resources", express.static(path.join(__dirname, '../shared/public')));
@@ -28,7 +25,7 @@ async function main() {
     });
 
     app.set('view engine', 'pug');
-    app.set('views', path.join(__dirname, '../shared/public'));
+    app.set('views', path.join(__dirname, '../shared/views'));
 
     app.use(require("./controllers/appController.js"));
 

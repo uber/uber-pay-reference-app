@@ -65,7 +65,7 @@ async function main() {
     })
 
     app.set('view engine', 'pug');
-    app.set('views', path.join(__dirname, "../shared/public"));
+    app.set('views', path.join(__dirname, "../shared/views"));
 
     // -- Routers
     app.use(require('./controllers/merchantController'));

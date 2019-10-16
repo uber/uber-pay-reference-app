@@ -1,0 +1,47 @@
+extends components/layout.pug
+
+mixin param(content, defaultValue)
+	.columns
+		.column.is-right
+			p=content
+		.column.is-left
+			if defaultValue != null
+				input(id=`param_${content.toLowerCase().replace(' ', '_')}` value=defaultValue)
+			else
+				input(id=`param_${content.toLowerCase().replace(' ', '_')}`)
+			block
+
+block scripts
+	script(src="/resources/js/index.view.js")
+
+
+block header 
+	include components/header
+
+block content
+	.block.small.is-error.hidden#error(style="transition:0.2s;")
+		.container.centered
+			a.button.outline.small.light.round(onclick="root.closeError()") x
+			p.light.w-light#error-text test error.
+	// Form data
+	.container.centered
+		.columns
+			.column
+				h2 Request
+				+param("Endpoint URL", "localhost")
+				+param("Funding Method", "BOLETO")
+				+param("Country ISO", 'BR')
+				+param("Destination", '61a7d289-fb72-4c81-8eb0-84ed2221f43b')
+				+param("Amount", 100000)
+					select(id=`param_currency`)
+						option(value="BRL") Brazilian Real
+						option(value="USD") US Dollars
+						option(value="EUR") Euros
+				+param("Description", "I'm a deposit in sandbox.")
+				+param("DeviceSessionId", "8b31b7f4-3542-4391-817c-d496ce84a7ae")
+				.form
+					a.button(type="button" value="Send request" onclick="root.sendRequest()") Send Request
+				<br>
+			.column
+				h3 Request JSON
+				pre#req
