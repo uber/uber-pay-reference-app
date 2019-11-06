@@ -1,0 +1,11 @@
+extends components/layout.pug
+
+block header 
+    include components/header
+
+block content
+    .container
+        h1 Uh oh...
+        p You seem to already have confirmed or cancelled this deposit.
+        a(href="http://127.0.0.1")
+            button.button Go back

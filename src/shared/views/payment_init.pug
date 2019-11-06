@@ -1,8 +1,5 @@
 extends components/layout
 
-block scripts
-    script(src="/resources/js/script.js")
-
 block header
     include components/header_big
 
@@ -17,8 +14,10 @@ block content
                         | You are about to top up <b style="font-weight:initial;">#{data.amount.currency} 
                         | #{Math.round(data.amount.value / 100000)}</b> to Uber.
                     <br>
-                    button.button(onclick="root.confirmPayment()") Confirm
-                    button.button.outline(onclick="root.cancelPayment()") Cancel
+                    a(href=`/payments/${session}/confirm`)
+                        button.button Confirm
+                    a(href=`/payments/${session}/cancel`)
+                        button.button.outline Cancel
 
                     h3 Request data
                     pre https://api-sandbox.uber.com/v1/payments/deposits

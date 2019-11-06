@@ -1,0 +1,13 @@
+# Node.JS related files
+node_modules/
+*.log
+
+# Mac-related files
+.DS_Store
+
+# Parcel
+.cache/
+
+# Application
+.env
+public/

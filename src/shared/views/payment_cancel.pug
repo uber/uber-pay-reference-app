@@ -1,8 +1,5 @@
 extends components/layout
 
-block scripts
-    script(src="/resources/js/script.js")
-
 block header
     include components/header_big
 
@@ -13,9 +10,9 @@ block content
             .columns.centered
                 .column
                     p(style="font-weight: 100;") 
-                        | Thank you for topping up!
+                        | Oh! it seems you cancelled the transaction.
                     br
                     h3 Response
                     if data != null
-                        pre POST https://api-sandbox.uber.com/v1/payments/deposits/#{data.deposit.id}/confirm
+                        pre POST https://api-sandbox.uber.com/v1/payments/deposits/#{data.deposit.id}/cancel
                         pre.code=JSON.stringify(data, null, 2)

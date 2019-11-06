@@ -1,20 +1,20 @@
 class MemoryStore {
-    constructor() { 
-        this._kvStore = {};
-    }
+  constructor() {
+    this.kvStore = {};
+  }
 
-    get(id) {
-        return this._kvStore[id];
-    }
+  get(id) {
+    return this.kvStore[id];
+  }
 
-    put(id, val) { 
-        this._kvStore[id] = val;
-    }
+  put(id, val) {
+    this.kvStore[id] = val;
+  }
 }
 
 const memStore = new MemoryStore();
 
 module.exports = async (req, res, next) => {
-    res.cache = memStore;
-    await next();
+  res.cache = memStore;
+  await next();
 };
