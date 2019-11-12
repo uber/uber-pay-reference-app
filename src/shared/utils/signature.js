@@ -13,30 +13,28 @@ function createDigest(body) {
   return `SHA-256=${digest.toString('base64')}`;
 }
 
-// Validate a digest with 
+// Validate a digest with the current request body.
 function validateDigest(digest, requestBody) {
-    // Verify equality of digests.
-    return digest === createDigest(requestBody);
+  // Verify equality of digests.
+  return digest === createDigest(requestBody);
 }
 
-function createSignature(privateKey, date, host, digest) {
+function createPayload(requestTarget, date, host, digest) {
+  let payload = '';
+  payload += `(request-target): ${requestTarget}${newline}`;
+  payload += `${'host: '}${host}${newline}`;
+  payload += `${'date: '}${date.toUTCString()}${newline}`;
+  payload += `${'digest: '}${digest}`;
+  return payload;
+}
+
+function createSignature(privateKey, requestTarget, date, host, digest) {
   if (privateKey === null
     || privateKey.length === 0) {
     throw new Error('Private key is not set up in .env file. Please enter your private key and restart this app.');
   }
 
-  // Start building the signature headers
-  let signature = '';
-  signature += 'keyId="key-rsa-1",';
-  signature += 'algorithm="rsa-sha256",';
-  signature += 'headers="(request-target) host date digest",';
-
-  // Start building the payload
-  let payload = '';
-  payload += `(request-target): post /api/deposit/init${newline}`;
-  payload += `${'host: '}${host}${newline}`;
-  payload += `${'date: '}${date.toUTCString()}${newline}`;
-  payload += `${'digest: '}${digest}`;
+  let payload = createPayload(requestTarget, date, host, digest);
 
   // Sign the signature with sha256 as hashing algorithm
   const signedPayload = crypto.createSign('sha256')
@@ -48,10 +46,15 @@ function createSignature(privateKey, date, host, digest) {
       // Uber uses RSA-RSS, so make sure to set padding to such.
       padding: crypto.constants.RSA_PKCS1_PADDING,
     });
-
+    
   // Encode the signed payload to a base64 string
   const basePayload = signedPayload.toString('base64');
 
+  // Start building the signature headers
+  let signature = '';
+  signature += 'keyId="key-rsa-1",';
+  signature += 'algorithm="rsa-sha256",';
+  signature += 'headers="(request-target) host date digest",'; 
   // Add the base64 payload to the signature
   signature += `signature="${basePayload}"`;
 
@@ -93,13 +96,9 @@ function parseSignatureHeader(header) {
 /** @param digest the digest of the current payload */
 /** @returns @type boolean */
 function validateSignature(signature, publicKey, requestTarget, date, host, digest) {
-  const parsedSignature = this.parseSignatureHeader(signature);
+  const parsedSignature = parseSignatureHeader(signature);
 
-  let payload = '';
-  payload += `${'(request-target): '}${requestTarget}${newline}`;
-  payload += `${'host: '}${host}${newline}`;
-  payload += `${'date: '}${date}${newline}`;
-  payload += `${'digest: '}${digest}`;
+  let payload = createPayload(requestTarget, date, host, digest);
 
   const incomingBuffer = Buffer.from(parsedSignature.signature, 'base64');
 

@@ -44,7 +44,9 @@ class MerchantController {
       });
     }
 
-    if (!this.signatureHandler.validateSignature(req)) {
+    if (!this.signatureHandler.validateSignature(
+      
+    )) {
       return utils.badRequest(res, {
         error: 'signature could not be verified.',
       });

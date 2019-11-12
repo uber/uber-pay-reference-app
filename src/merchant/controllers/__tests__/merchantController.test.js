@@ -1,6 +1,6 @@
 const MerchantController = require('../merchantController');
 
-test("run controller", async () => {
+test('run controller', async () => {
     const mockUberPaymentsClient = {
         createDepositAsync: function() { 
             return {
