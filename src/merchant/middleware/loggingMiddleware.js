@@ -1,8 +1,14 @@
 // this middleware logs incoming requests as both a debugging helper and tracker.
-async function log(req, res, next) {
-  console.log(` info : ${req.method} - ${req.url}`);
-  await next();
-  console.log(` info : ${res.statusCode}`);
+class LoggingMiddleware {
+  constructor(stream) {
+    this.stream = stream;
+  }
+
+  async route(req, res, next) {
+    this.stream.write(`info : ${req.method} - ${req.url}\n`);
+    await next();
+    this.stream.write(`info : ${res.statusCode}\n`);
+  }
 }
 
-module.exports = log;
+module.exports = LoggingMiddleware;
