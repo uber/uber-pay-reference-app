@@ -1,12 +1,8 @@
+function badRequest(res, value, errorCode) {
+  res.statusText = JSON.stringify(value);
+  return res.status(errorCode || 403).send();
+}
+
 module.exports = {
-  badRequest(res, errCode, value) {
-    if (value) {
-      console.log(` error : ${errCode} ${value.error}`);
-      res.statusText = JSON.stringify(value);
-      return res.status(errCode).send();
-    }
-    console.log(` error : ${errCode.error}`);
-    res.statusText = JSON.stringify(errCode);
-    return res.status(403).send();
-  },
+  badRequest,
 };

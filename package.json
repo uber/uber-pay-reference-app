@@ -22,6 +22,9 @@
     "node-sass-middleware": "^0.11.0",
     "uuid": "^3.3.3"
   },
+  "jest": {
+    "collectCoverage": true
+  },
   "scripts": {
     "start": "parcel build src/shared/resources/**/** --public-url ./ --global root -t node -d src/shared/public && concurrently --kill-others \"node src/merchant/index\" \"node src/app/index\"",
     "dev": "concurrently --kill-others \"parcel watch src/shared/resources/**/** -d src/shared/public --global root --target node --public-url ./\" \"nodemon src/app/index\" \"nodemon src/merchant/index\"",
