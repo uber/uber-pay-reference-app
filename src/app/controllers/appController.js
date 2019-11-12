@@ -1,6 +1,6 @@
 const Router = require('express').Router();
 const axios = require('axios');
-const crypto = require('crypto');
+const signature = require('../../shared/utils/signature');
 
 const privateKey = JSON.parse(`"${process.env.UBER_PRIV_KEY}"`);
 // Address to the merchant app.
@@ -10,12 +10,11 @@ Router.get('/', (req, res) => res.render('index'));
 
 Router.post('/init-deposit', async (req, res) => {
   // Create digest hash from request body
-  const digest = createDigest(req.rawBody);
+  const digest = signature.createDigest(req.rawBody);
   const date = new Date();
 
-  const signature = await createSignature(date, hostUrl, digest);
-  if (signature == null) {
-    console.error('Signature creation failed.');
+  const newSignature = await signature.createSignatureAsync(privateKey, date, hostUrl, digest);
+  if (newSignature == null) {
     return res.status(500)
       .send();
   }
@@ -33,66 +32,12 @@ Router.post('/init-deposit', async (req, res) => {
     },
   });
   if (response.status >= 200 && response < 300) {
-    console.log(response.status);
     return res.status(response.status)
       .send('error');
   }
-  console.log('success');
   return res.status(200)
     .set('Location', response.headers.location)
     .send();
 });
-
-// Create a digest from the request body
-// @param body: string - request body of a web request.
-function createDigest(body) {
-  const buffer = Buffer.from(body);
-  const digest = crypto.createHash('sha256')
-    .update(buffer)
-    .digest();
-    // return HashAlgorithm=DigestBody, as shown in https://tools.ietf.org/html/rfc3230#section-4.1.1
-  return `SHA-256=${digest.toString('base64')}`;
-}
-
-async function createSignature(date, host, digest) {
-  const newline = '\n';
-
-  if (privateKey === null
-        || privateKey.length === 0) {
-    throw new Error('Private key is not set up in .env file. Please enter your private key and restart this app.');
-  }
-
-  // Start building the signature headers
-  let signature = '';
-  signature += 'keyId="key-rsa-1",';
-  signature += 'algorithm="rsa-sha256",';
-  signature += 'headers="(request-target) host date digest",';
-
-  // Start building the payload
-  let payload = '';
-  payload += `(request-target): post /api/deposit/init${newline}`;
-  payload += `${'host: '}${host}${newline}`;
-  payload += `${'date: '}${date.toUTCString()}${newline}`;
-  payload += `${'digest: '}${digest}`;
-
-  // Sign the signature with sha256 as hashing algorithm
-  const signedPayload = await crypto.createSign('sha256')
-    // Hash the payload built above
-    .update(payload)
-    .sign({
-      // Use your Private key to sign it
-      key: privateKey,
-      // Uber uses RSA-RSS, so make sure to set padding to such.
-      padding: crypto.constants.RSA_PKCS1_PADDING,
-    });
-
-  // Encode the signed payload to a base64 string
-  const basePayload = signedPayload.toString('base64');
-
-  // Add the base64 payload to the signature
-  signature += `signature="${basePayload}"`;
-
-  return signature;
-}
 
 module.exports = Router;

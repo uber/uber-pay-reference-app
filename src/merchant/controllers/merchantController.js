@@ -3,15 +3,19 @@ const crypto = require('crypto');
 const utils = require('../utils/expressUtils');
 
 // This is an API router, this means that this should NEVER return a render of one of the pages.
+/** @param {UberPaymentsClient} uberClient */
+/** @param {SimpleIdGenerator} idGenerator */
+/** @param {SignatureHandler} signatureHandler */
 class MerchantController {
-  constructor(uberClient, idGenerator) {
+  constructor(uberClient, idGenerator, signatureHandler) {
     this.uberClient = uberClient;
     this.idGenerator = idGenerator;
+    this.signatureHandler = signatureHandler;
   }
 
   // For more info read the integration guide located here
   // https://developer.uber.com/docs/secured/payments/references/api/v1/init-deposit
-  async initDeposit(req, res) {
+  async initDepositAsync(req, res) {
     // Generate a session Id for this deposit.
     const sessionId = this.idGenerator.generateId();
 
@@ -34,13 +38,13 @@ class MerchantController {
       });
     }
 
-    if (!this.validateDigest(req)) {
+    if (!this.signatureHandler.validateDigest(req.get('digest'), req.rawBody)) {
       return utils.badRequest(res, {
         error: 'invalid digest',
       });
     }
 
-    if (!this.validateSignature(req)) {
+    if (!this.signatureHandler.validateSignature(req)) {
       return utils.badRequest(res, {
         error: 'signature could not be verified.',
       });
@@ -86,74 +90,13 @@ class MerchantController {
       .send();
   }
 
-  validateDigest(req) {
-    // Fetch the digest of the body
-    const digest = req.get('digest');
-
-    // Create own digest
-    const currentDigest = `SHA-256=${crypto.createHash('sha256')
-      .update(req.rawBody)
-      .digest('base64')}`;
-
-    // Verify equality of digests.
-    return digest === currentDigest;
-  }
-
-  // A quick helper function that parses the signature header into a JS object for utility.
-  parseSignatureHeader(header) {
-    const dict = {};
-    // Splits the signature objects into seperate string arrays
-    const items = header.split(',');
-    for (let idx = 0; idx < items.length; idx++) {
-      let i = 0;
-      let nameBuf = '';
-      do {
-        nameBuf += items[idx][i];
-        i++;
-      } while (items[idx][i] !== '=');
-      i += 2; // skip equals & quote
-      let valueBuf = '';
-      do {
-        valueBuf += items[idx][i];
-        i++;
-      } while (items[idx][i] !== '"');
-      // Assigns the aggregated name to the value. This would convert a signature object that
-      // would look like "hash=md5" to dict.hash with the value "md5".
-      dict[nameBuf] = valueBuf;
-    }
-    return dict;
-  }
-
-  // Reconstructs the signature with the current payload, and validates it with the public
-  // key from the same pair.
-  validateSignature(req) {
-    const publicKey = process.env.UBER_PUB_KEY;
-    const signature = this.parseSignatureHeader(req.get('signature'));
-    const newline = '\n';
-
-    let payload = '';
-    payload += `${'(request-target): '}${req.method.toLowerCase()} ${req.originalUrl}${newline}`;
-    payload += `${'host: '}${req.get('host')}${newline}`;
-    payload += `${'date: '}${req.get('date')}${newline}`;
-    payload += `${'digest: '}${req.get('digest')}`;
-
-    const incomingBuffer = Buffer.from(signature.signature, 'base64');
-
-    return crypto.createVerify('sha256')
-      .update(payload)
-      .verify({
-        key: publicKey,
-        padding: crypto.constants.RSA_PKCS1_PADDING,
-      }, incomingBuffer);
-  }
-
   validateInitiatedAt(time) {
     return true;
   }
 
   getRouter() {
     return express.Router()
-      .post('/init', (req, res) => this.initDeposit(req, res));
+      .post('/init', (req, res) => this.initDepositAsync(req, res));
   }
 }
 
