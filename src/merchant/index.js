@@ -2,7 +2,7 @@ const path = require('path');
 
 const express = require('express');
 const axios = require('axios');
-const dotenv = require('dotenv');
+require('dotenv').config();
 
 const jsonMiddleware = require('../shared/middleware/jsonBodyMiddleware');
 const memCacheMiddleware = require('./middleware/requestCache');
@@ -10,12 +10,11 @@ const loggingMiddleware = require('./middleware/loggingMiddleware');
 
 const IdGenerator = require('./services/simpleIdGenerator');
 const UberPaymentsClient = require('./services/uberPaymentsClient');
+const signature = require('../shared/utils/signature')
 
 const PaymentsController = require('./controllers/paymentsController');
 const MerchantController = require('./controllers/merchantController');
 
-// Load .env file
-dotenv.config();
 
 const app = express();
 const port = 8080;
@@ -56,8 +55,10 @@ async function main() {
   // -- Middleware
   app.use('/resources', express.static(path.join(__dirname, '../shared/public')));
 
+  const log = new loggingMiddleware(process.stdout);
+
   app.use(jsonMiddleware);
-  app.use(loggingMiddleware);
+  app.use((req, res, next) => log.route(req, res, next));
   app.use(memCacheMiddleware);
 
   app.use((_, res, next) => {
@@ -76,7 +77,7 @@ async function main() {
   const generator = new IdGenerator();
 
   // -- Routers
-  const merchantController = new MerchantController(uberPaymentsClient, generator);
+  const merchantController = new MerchantController(uberPaymentsClient, generator, signature);
   app.use('/api/deposit', merchantController.getRouter());
 
   const paymentsController = new PaymentsController(uberPaymentsClient);

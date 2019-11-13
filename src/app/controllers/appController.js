@@ -12,22 +12,24 @@ Router.post('/init-deposit', async (req, res) => {
   // Create digest hash from request body
   const digest = signature.createDigest(req.rawBody);
   const date = new Date();
+  const url = new URL(`http://${hostUrl}/api/deposit/init`);
 
-  const newSignature = await signature.createSignatureAsync(privateKey, date, hostUrl, digest);
+  const newSignature = signature.createSignature(privateKey
+    , "post /api/deposit/init", date, url.host, digest);
   if (newSignature == null) {
     return res.status(500)
       .send();
   }
 
   const response = await axios({
-    url: `http://${hostUrl}/api/deposit/init`,
+    url: url.toString(),
     method: 'POST',
     data: req.body,
     headers: {
       'Content-Type': 'application/json',
       Date: date.toUTCString(),
       Digest: digest,
-      Signature: signature,
+      Signature: newSignature,
       'X-Idempotency-Key': 'c900d4dd-7070-4e0b-9323-8f24cfde0490',
     },
   });

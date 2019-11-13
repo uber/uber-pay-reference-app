@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const utils = require('../utils/expressUtils');
 
+const publicKey =  JSON.parse(`"${process.env.UBER_PUB_KEY}"`);
+
 // This is an API router, this means that this should NEVER return a render of one of the pages.
 /** @param {UberPaymentsClient} uberClient */
 /** @param {SimpleIdGenerator} idGenerator */
@@ -18,7 +20,9 @@ class MerchantController {
   async initDepositAsync(req, res) {
     // Generate a session Id for this deposit.
     const sessionId = this.idGenerator.generateId();
-
+    const host = process.env.DEVELOPMENT
+      ? `http://${req.connection.localAddress}:${req.connection.localPort}`
+      : `https://${req.hostname}`;
     // Check if the request is valid; else return a bad request.
     if (!req.body.amount) {
       return utils.badRequest(res, {
@@ -45,7 +49,12 @@ class MerchantController {
     }
 
     if (!this.signatureHandler.validateSignature(
-      
+      req.get('signature'),  
+      publicKey, 
+      `${req.method.toLowerCase()} ${req.originalUrl}`, 
+      req.get('date'), 
+      req.get('host'), 
+      req.get('digest')  
     )) {
       return utils.badRequest(res, {
         error: 'signature could not be verified.',
@@ -80,13 +89,9 @@ class MerchantController {
         res: x.data,
       });
     } catch (ex) {
-      console.log(ex);
       return utils.badRequest(res, ex);
     }
 
-    const host = process.env.DEVELOPMENT
-      ? `http://${req.connection.localAddress}:${req.connection.localPort}`
-      : `https://${req.hostname}`;
     return res.status(201)
       .set('Location', `${host}/payments/init?sessionId=${sessionId}`)
       .send();

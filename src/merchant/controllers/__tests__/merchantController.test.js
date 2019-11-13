@@ -27,6 +27,9 @@ test('run controller', async () => {
                 currency: "EUR"
             },   
         },
+        method: "post",
+        date: new Date(0),
+        digest: "abcd",
         rawBody: "abcd",
         get: function(str) {
             return "";

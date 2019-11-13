@@ -25,6 +25,8 @@ function createPayload(requestTarget, date, host, digest) {
   payload += `${'host: '}${host}${newline}`;
   payload += `${'date: '}${date.toUTCString()}${newline}`;
   payload += `${'digest: '}${digest}`;
+
+  console.log(payload);
   return payload;
 }
 
@@ -67,6 +69,10 @@ function parseSignatureHeader(header) {
   const dict = {};
   // Splits the signature objects into seperate string arrays
   const items = header.split(',');
+  if(items.length == 0) {
+    throw new Error("Invalid signature payload.");
+  }
+
   for (let idx = 0; idx < items.length; idx++) {
     let i = 0;
     let nameBuf = '';
@@ -96,9 +102,10 @@ function parseSignatureHeader(header) {
 /** @param digest the digest of the current payload */
 /** @returns @type boolean */
 function validateSignature(signature, publicKey, requestTarget, date, host, digest) {
+  console.log(signature);
   const parsedSignature = parseSignatureHeader(signature);
 
-  let payload = createPayload(requestTarget, date, host, digest);
+  let payload = createPayload(requestTarget, new Date(date), host, digest);
 
   const incomingBuffer = Buffer.from(parsedSignature.signature, 'base64');
 

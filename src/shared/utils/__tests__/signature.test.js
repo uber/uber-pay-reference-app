@@ -80,7 +80,7 @@ test('validate a signature', () => {
 
   const sign = signature.createSignature(
     mockPrivateKey, requestTarget, date, host, digest)
-    
+  
   const result = signature.validateSignature(
     sign, mockPublicKey, requestTarget, date, host, digest);
 

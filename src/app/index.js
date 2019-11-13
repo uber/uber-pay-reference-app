@@ -4,12 +4,13 @@ const dotenv = require('dotenv');
 const express = require('express');
 
 const jsonMiddleware = require('../shared/middleware/jsonBodyMiddleware');
-const appController = require('./controllers/appController.js');
 
 const app = express();
 const port = 80;
 
 dotenv.config();
+
+const appController = require('./controllers/appController.js');
 
 async function main() {
   // -- Middleware
