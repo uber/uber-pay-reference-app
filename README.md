@@ -5,7 +5,7 @@ This project shows how to integrate with [Uber Pay](https://developer.uber.com/d
 The goal of this project is to help you integrate, and go live faster with our APIs by avoiding common pitfalls.
 
 <p align="center">
-<img width="75%" src="https://github.com/uber-ex/uber-uberpay-us/blob/docs/img/screenshot-deposit.png"/>
+    <img width="75%" src="https://github.com/uber-ex/uber-uberpay-us/blob/docs/img/screenshot-deposit.png"/>
 </p>
 
 ## Install 
