@@ -1,4 +1,4 @@
-# Uber Pay integration reference app
+# Uber Pay reference app
 [![Build Status](https://travis-ci.com/uber/uber-uberpay-us.svg?token=ZPTWqoramjxEmQsZapKj&branch=master)](https://travis-ci.com/uber-ex/uber-uberpay-us)
 
 > This project is an example for the Uber Pay API. Support on this project may be limited.
