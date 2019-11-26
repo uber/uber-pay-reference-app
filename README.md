@@ -3,7 +3,7 @@
 
 > This project is an example for the Uber Pay API. Support on this project may be limited.
 
-This project shows how to integrate with [Uber Pay](https://developer.uber.com/docs/payments/introduction). It assists you in learning the fundamentals of the initiation. In a simplified environment for you to easily understand what is going on at all times. This API both mocks the Uber client (`src/app`) and creates an integration to initiate a payment request with (`src/merchant`).
+This project shows how to integrate with [Uber Pay](https://developer.uber.com/docs/payments/introduction). It assists you in learning the fundamentals of the initiation of a deposit flow. In a simplified environment for you to easily understand what is going on at all times. This API both mocks the Uber client (`src/app`) and creates an integration to initiate a payment request with (`src/merchant`).
 
 The goal of this project is to help you integrate, and go live faster with our APIs by avoiding common pitfalls.
 
