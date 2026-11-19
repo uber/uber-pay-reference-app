@@ -130,6 +130,9 @@ func (a *App) RunWorkers(ctx context.Context) {
 					break
 				}
 			}
+			if e := a.processReversal(ctx); e != nil && ctx.Err() == nil {
+				log.Print("refund reversal worker failure")
+			}
 			for i := 0; i < 8; i++ {
 				ok, e := a.processCallback(ctx)
 				if e != nil {
@@ -151,7 +154,7 @@ func (a *App) expireAuthorizations(ctx context.Context) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	rows, e := tx.Query(ctx, "SELECT id FROM transactions WHERE client_id=$1 AND kind='charge' AND state='AUTHORIZED' AND expires_at<=now()", a.Config.ClientID)
+	rows, e := tx.Query(ctx, "SELECT id FROM transactions WHERE client_id=$1 AND kind='charge' AND state='AUTHORIZED' AND expires_at<=now() AND NOT EXISTS(SELECT 1 FROM resource_claims r WHERE r.client_id=transactions.client_id AND r.resource_key='charge:'||transactions.id)", a.Config.ClientID)
 	if e != nil {
 		return e
 	}
@@ -207,7 +210,7 @@ func (a *App) processCompletion(ctx context.Context) (bool, error) {
 		return false, e
 	}
 	if t.State == "PENDING" {
-		if e = a.completeTransaction(ctx, tx, t, state, str(object(v), "detail")); e != nil {
+		if e = a.completeTransaction(ctx, tx, t, state, str(object(v), "detail"), object(v)["amount_e5"]); e != nil {
 			return false, e
 		}
 	}
@@ -217,9 +220,27 @@ func (a *App) processCompletion(ctx context.Context) (bool, error) {
 	}
 	return true, tx.Commit(ctx)
 }
-func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction, state string, detail string) error {
+func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction, state string, detail string, updated any) error {
 	if t.State != "PENDING" {
 		return nil
+	}
+	profileValue, _ := DecodeJSON([]byte(t.Profile))
+	profile := object(profileValue)
+	originalAmount := t.Amount
+	if t.Kind == "charge" && state == "CONFIRMED" && str(profile, "callback_mode") == "deposit" && updated != nil {
+		n, err := number(updated)
+		if err != nil || n <= 0 || n > t.Amount {
+			return errors.New("invalid local deposit amount")
+		}
+		if n != t.Amount {
+			if err = adjust(ctx, tx, a.Config.ClientID, t.Account, t.Currency, t.Amount-n, 0); err != nil {
+				return err
+			}
+			t.Amount = n
+			if _, err = tx.Exec(ctx, "UPDATE transactions SET amount_e5=$3 WHERE client_id=$1 AND kind='charge' AND id=$2", a.Config.ClientID, t.ID, n); err != nil {
+				return err
+			}
+		}
 	}
 	if t.Kind == "refund" {
 		if state == "CONFIRMED" {
@@ -257,6 +278,17 @@ func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction,
 	if e != nil {
 		return e
 	}
+	if t.Kind == "charge" && str(profile, "callback_mode") == "deposit" {
+		if state == "CONFIRMED" {
+			if t.Amount != originalAmount {
+				if err := queue(ctx, tx, a.Config.ClientID, t.Kind, t.ID, "CALLBACK", "updateDeposit", Object{"merchant_reference": t.Ref, "amount": Object{"value": t.Amount, "currency": t.Currency}}, "PENDING", 0); err != nil {
+					return err
+				}
+			}
+			return queue(ctx, tx, a.Config.ClientID, t.Kind, t.ID, "CALLBACK", "confirmDeposit", Object{"merchant_reference": t.Ref}, "PENDING", 0)
+		}
+		return queue(ctx, tx, a.Config.ClientID, t.Kind, t.ID, "CALLBACK", "cancelDeposit", Object{"merchant_reference": t.Ref, "cancel_reason": detail}, "PENDING", 0)
+	}
 	callback := "chargeCallback"
 	payload := Object{"state": Object{"value": state}, "psp_reference": t.Ref}
 	if state == "REJECTED" {
@@ -275,7 +307,13 @@ func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction,
 	if e = a.Contract.Callback(callback, payload); e != nil {
 		return e
 	}
-	return queue(ctx, tx, a.Config.ClientID, t.Kind, t.ID, "CALLBACK", callback, payload, "PENDING", 0)
+	if e = queue(ctx, tx, a.Config.ClientID, t.Kind, t.ID, "CALLBACK", callback, payload, "PENDING", 0); e != nil {
+		return e
+	}
+	if a.Config.ProcessorMode != "http" && t.Kind == "refund" && state == "CONFIRMED" && str(profile, "behavior") == "refund_reversal" {
+		return queue(ctx, tx, a.Config.ClientID, t.Kind, t.ID, "REVERSAL", "", Object{}, "PENDING", a.Config.AsyncDelay)
+	}
+	return nil
 }
 func (a *App) processCallback(ctx context.Context) (bool, error) {
 	tx, e := a.Store.Pool.Begin(ctx)
@@ -285,7 +323,7 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	defer tx.Rollback(ctx)
 	var id, kind, txID, name, body string
 	var attempts int
-	e = tx.QueryRow(ctx, "SELECT id,tx_kind,tx_id,callback_name,payload,attempts FROM jobs WHERE client_id=$1 AND job_type='CALLBACK' AND ((status='PENDING' AND next_attempt_at<=now()) OR (status='PROCESSING' AND lease_until<=now())) ORDER BY next_attempt_at LIMIT 1 FOR UPDATE SKIP LOCKED", a.Config.ClientID).Scan(&id, &kind, &txID, &name, &body, &attempts)
+	e = tx.QueryRow(ctx, "SELECT id,tx_kind,tx_id,callback_name,payload,attempts FROM jobs j WHERE client_id=$1 AND job_type='CALLBACK' AND ((status='PENDING' AND next_attempt_at<=now()) OR (status='PROCESSING' AND lease_until<=now())) AND NOT EXISTS(SELECT 1 FROM jobs older WHERE older.client_id=j.client_id AND older.tx_kind=j.tx_kind AND older.tx_id=j.tx_id AND older.job_type='CALLBACK' AND older.event_sequence<j.event_sequence AND older.status<>'DONE') ORDER BY next_attempt_at,event_sequence LIMIT 1 FOR UPDATE SKIP LOCKED", a.Config.ClientID).Scan(&id, &kind, &txID, &name, &body, &attempts)
 	if notFound(e) {
 		return false, nil
 	}
@@ -350,4 +388,41 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	delay += time.Duration(rand.Int64N(max(1, int64(a.Config.Retry/5))))
 	_, err := a.Store.Pool.Exec(ctx, "UPDATE jobs SET status=$2,lease_until=NULL,last_error=NULLIF($3,''),next_attempt_at=now()+($4*interval '1 millisecond') WHERE id=$1 AND status='PROCESSING' AND lease_until=$5", id, status, last, delay.Milliseconds(), lease)
 	return true, err
+}
+
+func (a *App) reverseRefund(ctx context.Context, tx pgx.Tx, id string) error {
+	var changed bool
+	if e := tx.QueryRow(ctx, "SELECT reference_reverse_refund($1,$2)", a.Config.ClientID, id).Scan(&changed); e != nil {
+		return e
+	}
+	if !changed {
+		return nil
+	}
+	t, e := getTransaction(ctx, tx, a.Config.ClientID, "refund", id)
+	if e != nil {
+		return e
+	}
+	return queue(ctx, tx, a.Config.ClientID, "refund", id, "CALLBACK", "updateRefund", Object{"status": "REJECTED", "merchant_reference": t.Ref, "failed_reason": "Synthetic processor reversed the refund; any unrecovered funds are recorded as debt"}, "PENDING", 0)
+}
+func (a *App) processReversal(ctx context.Context) error {
+	tx, e := a.Store.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	var job, id string
+	e = tx.QueryRow(ctx, "SELECT id,tx_id FROM jobs WHERE client_id=$1 AND job_type='REVERSAL' AND status='PENDING' AND next_attempt_at<=now() LIMIT 1 FOR UPDATE SKIP LOCKED", a.Config.ClientID).Scan(&job, &id)
+	if notFound(e) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	if e = a.reverseRefund(ctx, tx, id); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, "UPDATE jobs SET status='DONE' WHERE id=$1", job); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }

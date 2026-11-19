@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -69,36 +70,42 @@ func randomToken() string {
 }
 
 type Transaction struct {
-	Kind, ID, Ref, Original, Account, Currency, Capture, Funding, State, Detail, Hash, Response, Source, Payee string
-	Amount                                                                                                     int64
-	Status                                                                                                     int
-	Created, Updated                                                                                           time.Time
+	Kind, ID, Ref, Original, Account, Currency, Capture, Funding, State, Detail, Hash, Response, Source, Payee, Profile string
+	Amount                                                                                                              int64
+	Status                                                                                                              int
+	Created, Updated                                                                                                    time.Time
 }
 
 func getTransaction(ctx context.Context, tx pgx.Tx, client, kind, id string) (Transaction, error) {
 	t := Transaction{}
-	e := tx.QueryRow(ctx, "SELECT kind,id,psp_reference,COALESCE(original_id,''),account_id,amount_e5,currency,capture_method,funding_method,state,COALESCE(detail,''),request_hash,response_status,response_body,created_at,updated_at,COALESCE(source_account_id,''),COALESCE(payee_account_id,'') FROM transactions WHERE client_id=$1 AND kind=$2 AND id=$3 FOR UPDATE", client, kind, id).Scan(&t.Kind, &t.ID, &t.Ref, &t.Original, &t.Account, &t.Amount, &t.Currency, &t.Capture, &t.Funding, &t.State, &t.Detail, &t.Hash, &t.Status, &t.Response, &t.Created, &t.Updated, &t.Source, &t.Payee)
+	e := tx.QueryRow(ctx, "SELECT kind,id,psp_reference,COALESCE(original_id,''),account_id,amount_e5,currency,capture_method,funding_method,state,COALESCE(detail,''),request_hash,response_status,response_body,created_at,updated_at,COALESCE(source_account_id,''),COALESCE(payee_account_id,''),reference_profile FROM transactions WHERE client_id=$1 AND kind=$2 AND id=$3 FOR UPDATE", client, kind, id).Scan(&t.Kind, &t.ID, &t.Ref, &t.Original, &t.Account, &t.Amount, &t.Currency, &t.Capture, &t.Funding, &t.State, &t.Detail, &t.Hash, &t.Status, &t.Response, &t.Created, &t.Updated, &t.Source, &t.Payee, &t.Profile)
 	return t, e
 }
 func insertTransaction(ctx context.Context, tx pgx.Tx, client string, t Transaction) error {
 	_, e := tx.Exec(ctx, "INSERT INTO transactions(client_id,kind,id,psp_reference,original_id,account_id,amount_e5,currency,capture_method,funding_method,state,detail,request_hash,response_status,response_body,expires_at) VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,NULLIF($12,''),$13,$14,$15,CASE WHEN $11='AUTHORIZED' THEN now()+interval '72 hours' ELSE NULL END)", client, t.Kind, t.ID, t.Ref, t.Original, t.Account, t.Amount, t.Currency, t.Capture, t.Funding, t.State, t.Detail, t.Hash, t.Status, t.Response)
 	if e == nil {
-		_, e = tx.Exec(ctx, "UPDATE transactions SET source_account_id=NULLIF($4,''),payee_account_id=NULLIF($5,'') WHERE client_id=$1 AND kind=$2 AND id=$3", client, t.Kind, t.ID, t.Source, t.Payee)
+		_, e = tx.Exec(ctx, "UPDATE transactions SET source_account_id=NULLIF($4,''),payee_account_id=NULLIF($5,''),reference_profile=COALESCE(NULLIF($6,''),'{}') WHERE client_id=$1 AND kind=$2 AND id=$3", client, t.Kind, t.ID, t.Source, t.Payee, t.Profile)
 	}
 	return e
 }
 func accountBalance(ctx context.Context, tx pgx.Tx, client, account, currency string) (int64, int64, error) {
 	var a, b int64
-	e := tx.QueryRow(ctx, "SELECT available_e5,balance_e5 FROM accounts WHERE client_id=$1 AND account_id=$2 AND currency=$3 FOR UPDATE", client, account, currency).Scan(&a, &b)
+	e := tx.QueryRow(ctx, "SELECT reference_spendable(a.client_id,a.account_id,a.currency),GREATEST(0,a.balance_e5-COALESCE(d.debt_e5,0))::bigint FROM accounts a LEFT JOIN account_debts d USING(client_id,account_id,currency) WHERE a.client_id=$1 AND a.account_id=$2 AND a.currency=$3 FOR UPDATE OF a", client, account, currency).Scan(&a, &b)
 	return a, b, e
 }
 func adjust(ctx context.Context, tx pgx.Tx, client, account, currency string, available, balance int64) error {
-	_, e := tx.Exec(ctx, "UPDATE accounts SET available_e5=available_e5+$4,balance_e5=balance_e5+$5 WHERE client_id=$1 AND account_id=$2 AND currency=$3", client, account, currency, available, balance)
+	_, e := tx.Exec(ctx, "SELECT reference_adjust($1,$2,$3,$4,$5)", client, account, currency, available, balance)
 	return e
 }
 func queue(ctx context.Context, tx pgx.Tx, client, kind, id, job, callback string, payload any, status string, delay time.Duration) error {
-	jobID := fingerprint(client + "|" + kind + "|" + id + "|" + job + "|" + callback)
-	_, e := tx.Exec(ctx, "INSERT INTO jobs(id,client_id,tx_kind,tx_id,job_type,callback_name,payload,status,next_attempt_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+($9*interval '1 millisecond')) ON CONFLICT DO NOTHING", jobID, client, kind, id, job, callback, encode(payload), status, delay.Milliseconds())
+	var sequence int64
+	if job == "CALLBACK" {
+		if e := tx.QueryRow(ctx, "SELECT COALESCE(reference_next_event($1,$2,$3),0)", client, kind, id).Scan(&sequence); e != nil {
+			return e
+		}
+	}
+	jobID := fingerprint(client + "|" + kind + "|" + id + "|" + job + "|" + callback + "|" + fmt.Sprint(sequence))
+	_, e := tx.Exec(ctx, "INSERT INTO jobs(id,client_id,tx_kind,tx_id,job_type,callback_name,payload,status,next_attempt_at,event_sequence) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+($9*interval '1 millisecond'),$10) ON CONFLICT DO NOTHING", jobID, client, kind, id, job, callback, encode(payload), status, delay.Milliseconds(), sequence)
 	return e
 }
 func notFound(e error) bool { return errors.Is(e, pgx.ErrNoRows) }

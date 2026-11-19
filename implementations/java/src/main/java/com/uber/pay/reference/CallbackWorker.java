@@ -80,11 +80,21 @@ final class CallbackWorker implements AutoCloseable {
                     Json.parse(Database.str(j, "payload")).path("state").asText(),
                     Json.parse(Database.str(j, "payload"))
                         .path("detail")
-                        .asText("MERCHANT_REJECTED"));
+                        .asText("MERCHANT_REJECTED"),
+                    Json.parse(Database.str(j, "payload")).path("amount_e5"));
               } catch (ApiError e) {
                 Database.execute(
                     c, "UPDATE jobs SET status='DONE',lease_until=NULL WHERE id=?", j.get("id"));
               }
+            }
+            for (var review :
+                Database.query(
+                    c,
+                    "SELECT * FROM jobs WHERE client_id=? AND job_type='REVERSAL' AND"
+                        + " status='PENDING' AND next_attempt_at<=now()",
+                    config.client)) {
+              payments.reverseRefund(c, Database.str(review, "tx_id"));
+              Database.execute(c, "UPDATE jobs SET status='DONE' WHERE id=?", review.get("id"));
             }
             return null;
           });
@@ -94,10 +104,14 @@ final class CallbackWorker implements AutoCloseable {
                 var r =
                     Database.one(
                         c,
-                        "SELECT * FROM jobs WHERE client_id=? AND job_type='CALLBACK' AND"
+                        "SELECT * FROM jobs j WHERE client_id=? AND job_type='CALLBACK' AND"
                             + " status='PENDING' AND next_attempt_at<=now() AND (lease_until IS"
-                            + " NULL OR lease_until<now()) ORDER BY next_attempt_at LIMIT 1 FOR"
-                            + " UPDATE SKIP LOCKED",
+                            + " NULL OR lease_until<now()) AND NOT EXISTS(SELECT 1 FROM jobs older"
+                            + " WHERE older.client_id=j.client_id AND older.tx_kind=j.tx_kind AND"
+                            + " older.tx_id=j.tx_id AND older.job_type='CALLBACK' AND"
+                            + " older.event_sequence<j.event_sequence AND older.status<>'DONE')"
+                            + " ORDER BY next_attempt_at,event_sequence LIMIT 1 FOR UPDATE SKIP"
+                            + " LOCKED",
                         config.client);
                 if (r != null)
                   Database.execute(

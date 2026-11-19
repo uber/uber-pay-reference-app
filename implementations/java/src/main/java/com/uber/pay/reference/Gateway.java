@@ -16,25 +16,34 @@ final class Gateway {
   final Contracts contracts;
   final PaymentService payments;
   final WalletService wallets;
+  final ProcessorExecutor processor;
 
-  Gateway(Config c, Database d, Contracts ct, PaymentService p, WalletService w) {
+  Gateway(
+      Config c,
+      Database d,
+      Contracts ct,
+      PaymentService p,
+      WalletService w,
+      ProcessorExecutor processor) {
     config = c;
     db = d;
     contracts = ct;
     payments = p;
     wallets = w;
+    this.processor = processor;
   }
 
   @RequestMapping("/**")
   ResponseEntity<byte[]> handle(HttpServletRequest req) {
     String template = "";
     try {
-      return send(route(req));
+      return sendLocal(req, route(req));
     } catch (ApiError e) {
       String path = req.getRequestURI();
       template = template(path);
       if (template.equals("/token") || template.equals("/authorize"))
-        return send(
+        return sendLocal(
+            req,
             Reply.json(
                 400,
                 Json.obj(
@@ -48,11 +57,15 @@ final class Gateway {
                             .contains(e.code)
                         ? e.code
                         : "invalid_request")));
-      if (!template.isEmpty()) return send(payments.error(template, e));
-      return send(Reply.empty(e.status));
+      if (!template.isEmpty()) return sendLocal(req, payments.error(template, e));
+      return sendLocal(req, Reply.empty(e.status));
     } catch (Exception e) {
-      return send(Reply.empty(500));
+      return sendLocal(req, Reply.empty(500));
     }
+  }
+
+  ResponseEntity<byte[]> sendLocal(HttpServletRequest req, Reply r) {
+    return send(payments.localize(r, req.getHeader("Accept-Language")));
   }
 
   ResponseEntity<byte[]> send(Reply r) {
@@ -109,6 +122,15 @@ final class Gateway {
       return Reply.json(200, Json.obj("status", "ok", "language", "java"));
     }
     Map<String, String> query = form(req.getQueryString());
+    if (raw.equals("/adapter/events")) {
+      if (!config.processorMode.equals("http")
+          || !method.equals("POST")
+          || !WalletService.equal(
+              Objects.toString(req.getHeader("Authorization"), ""),
+              "Bearer " + config.processorToken)) return Reply.empty(404);
+      processor.event(Json.parse(new String(bytes, StandardCharsets.UTF_8)));
+      return Reply.empty(204);
+    }
     if (raw.startsWith("/_test/")) return control(req, raw, method, bytes);
     if (raw.equals("/demo/consent") && method.equals("POST"))
       return wallets.consent(form(new String(bytes, StandardCharsets.UTF_8)));
@@ -172,13 +194,23 @@ final class Gateway {
                 .contains(t)
         || headers.containsKey("authorization"))
       wallets.bearer(headers.get("authorization"), scope, account);
+    if (config.processorMode.equals("http")
+        && ProcessorExecutor.money(op.path("operationId").asText()))
+      return processor.execute(
+          op.path("operationId").asText(),
+          t,
+          raw.substring(config.base.length()),
+          headers.get("x-idempotency-key"),
+          body,
+          ReferenceFeatures.locale(req.getHeader("Accept-Language")));
     return payments.execute(
         op.path("operationId").asText(),
         t,
         raw.substring(config.base.length()),
         headers.get("x-idempotency-key"),
         body,
-        query);
+        query,
+        ReferenceFeatures.locale(req.getHeader("Accept-Language")));
   }
 
   Reply action(HttpServletRequest req, Map<String, String> q, byte[] raw) {
@@ -203,20 +235,64 @@ final class Gateway {
                   Json.parse(Database.str(job, "payload"));
           if (payload.path("expires_at").asLong() <= System.currentTimeMillis())
             throw new ApiError(400, "invalid_request", "Expired action");
-          if (!post)
-            return Reply.html(
-                "<!doctype html><html><body><h1>Local synthetic payment</h1><form method='post'"
-                    + " action='/demo/action'><input type='hidden' name='action_token' value='"
+          if (!post) {
+            String language = payload.path("locale").asText("en-US");
+            var words = payments.features;
+            String amount =
+                payload.path("profile").path("allow_amount_update").asBoolean()
+                    ? "<label>"
+                        + words.text(language, "amount")
+                        + "<input name='amount_e5' inputmode='numeric'></label>"
+                    : "";
+            return Ui.html(
+                "<!doctype html><html lang='"
+                    + language
+                    + "'><body><h1>"
+                    + words.text(language, "payment_title")
+                    + "</h1><p>"
+                    + words.text(language, "synthetic")
+                    + "</p><form method='post' action='/demo/action'><input type='hidden'"
+                    + " name='action_token' value='"
                     + token
                     + "'><input type='hidden' name='csrf' value='"
                     + payload.path("csrf").asText()
-                    + "'><button name='decision' value='approve'>Confirm</button><button"
-                    + " name='decision' value='deny'>Reject</button></form></body></html>");
+                    + "'>"
+                    + amount
+                    + "<button name='decision' value='approve'>"
+                    + words.text(language, "confirm")
+                    + "</button><button name='decision' value='deny'>"
+                    + words.text(language, "reject")
+                    + "</button></form></body></html>",
+                language);
+          }
           if (!WalletService.equal(payload.path("csrf").asText(), f.get("csrf"))
               || !Set.of("approve", "deny").contains(f.getOrDefault("decision", "")))
             throw new ApiError(400, "invalid_request", "Invalid action");
           payload.put("state", f.get("decision").equals("approve") ? "CONFIRMED" : "REJECTED");
           payload.put("detail", "USER_CANCELLED");
+          String amount = f.getOrDefault("amount_e5", "");
+          if (!amount.isEmpty()) {
+            if (!payload.path("profile").path("allow_amount_update").asBoolean()
+                || !amount.matches("[1-9][0-9]*"))
+              throw new ApiError(400, "invalid_request", "Invalid local amount");
+            long value;
+            try {
+              value = Long.parseLong(amount);
+            } catch (NumberFormatException e) {
+              throw new ApiError(400, "invalid_request", "Invalid local amount");
+            }
+            var tx =
+                Database.one(
+                    c,
+                    "SELECT amount_e5 FROM transactions WHERE client_id=? AND kind='charge' AND"
+                        + " id=?",
+                    config.client,
+                    job.get("tx_id"));
+            if (value > Database.number(tx, "amount_e5"))
+              throw new ApiError(400, "invalid_request", "Amount exceeds original");
+            payload.put("amount_e5", value);
+          }
+
           int n =
               Database.execute(
                   c,
@@ -273,6 +349,8 @@ final class Gateway {
                     kind,
                     id);
             if (n == 0) throw new ApiError(400, "invalid_request", "Completion is not pending");
+          } else if (path.equals("/_test/reverse-refund")) {
+            payments.reverseRefund(c, Json.text(b, "id"));
           } else if (path.equals("/_test/expire")) {
             String id = Json.text(b, "id");
             Database.execute(

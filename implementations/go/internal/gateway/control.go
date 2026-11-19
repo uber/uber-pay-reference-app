@@ -39,7 +39,7 @@ func (a *App) testControl(w http.ResponseWriter, r *http.Request) {
 			rows.Close()
 			out[table] = data
 		}
-		a.write(w, Reply{200, encode(out)})
+		a.write(w, Reply{200, encode(out), nil})
 		return
 	}
 	if r.Method != "POST" || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -78,6 +78,8 @@ func (a *App) testControl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, e = tx.Exec(ctx, "UPDATE jobs SET payload=$4,status='PENDING',next_attempt_at=now() WHERE client_id=$1 AND tx_kind=$2 AND tx_id=$3 AND job_type='COMPLETION' AND status IN ('PENDING','WAITING')", a.Config.ClientID, kind, t.ID, encode(Object{"state": state}))
+	case "/_test/reverse-refund":
+		e = a.reverseRefund(ctx, tx, str(b, "id"))
 	case "/_test/expire":
 		t, err := getTransaction(ctx, tx, a.Config.ClientID, "charge", str(b, "id"))
 		if err != nil || t.State != "AUTHORIZED" {
@@ -100,5 +102,5 @@ func (a *App) testControl(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
-	a.write(w, Reply{200, `{"status":"accepted"}`})
+	a.write(w, Reply{200, `{"status":"accepted"}`, nil})
 }

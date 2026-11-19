@@ -40,7 +40,7 @@ make contract                      # source hash, schema syntax and reference ch
 
 Use a different native database with `make conformance LANGUAGE=all DATABASE_URL=postgresql://uberpay:uberpay@127.0.0.1:5432/uberpay`. Local DB hosts are restricted; each test run uses a new synthetic client namespace. A PostgreSQL installation can also be managed with `tools/local_db.py` on port 55432; it does not register a background OS service.
 
-The harness launches native processes, signs the exact request bytes, validates responses **independently** against the contract, receives all six callback types, injects failures, tests concurrent requests, and restarts gateways. No language proxies its implementation through another. Required cases are not silently skipped. JSON and JUnit reports plus redacted server logs are written under `.artifacts/conformance/` (ignored by Git). JSON fixtures live in `conformance/fixtures/`; `--match` is available for debugging but is not a release qualification run.
+The harness launches native processes, signs the exact request bytes, validates responses **independently** against the contract, receives all six callback types, injects failures, tests concurrent requests, and restarts gateways. No language proxies its implementation through another. Required cases are not silently skipped. JSON and JUnit reports plus redacted server logs are written under `.artifacts/conformance/` (ignored by Git). Ten versioned [JSON workflows](docs/scenario-format.md) include typed bindings, concurrency, SQL faults, forms and process restart; independent Python probes cover processor barriers and multi-worker lease faults. All run against every language. JSON fixtures live in `conformance/fixtures/`; `--match` is available for debugging but is not a release qualification run.
 
 ## API and behavior
 
@@ -49,14 +49,14 @@ The harness launches native processes, signs the exact request bytes, validates 
 | `POST /charge` | Sync confirmed/rejected, pending, WebView/QR action, manual authorization |
 | `POST /charge/{id}/capture`, `POST /charge/{id}/cancel` | Full capture/cancel; expiry and concurrent-state protection |
 | `GET /find-transaction` | Charge/refund lookup with original Uber ID |
-| `POST /refund` | Full/partial refund; pending completion and callback |
-| `POST /balance` | Exact E5 available/total balance; signed request **and** scoped bearer |
+| `POST /refund` | Full/partial refund, pending/rejected completion and ordered late reversal |
+| `POST /balance` | Exact E5 available/total and optional itemized balance; signed request **and** scoped bearer |
 | `POST /payout` | Sync or pending payout and callback |
 | `GET /authorize`, `POST /token` | Explicit demo consent; code, refresh and wallet grants |
 
-Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are contract/client examples, not an automatic routing rule for every charge.
+Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows, not an automatic routing rule for ordinary charges. Real routing remains pending Uber confirmation (U11).
 
-Demo funding codes: `DEMO_SYNC`, `DEMO_REJECT`, `DEMO_PENDING`, `DEMO_PENDING_REJECT`, `DEMO_WEBVIEW`, `DEMO_QR`. These are local controls, **not** Uber-assigned funding codes. Demo accounts use BRL and begin with synthetic E5 balances. The HTTP contract uses integer E5 amounts, never floating-point money.
+Demo profiles include sync/pending/reject, WebView/QR, capture hard/soft decline, refund pending rejection/late reversal, itemized meal-voucher balance, and a separate deposit flow. `contracts/reference-features.json` declares every profile plus triggers for all 14 charge and 10 payout callback reasons. These are local controls, **not** Uber-assigned funding codes. Demo accounts use BRL and begin with synthetic E5 balances. The HTTP contract uses integer E5 amounts, never floating-point money.
 
 ## Repository map
 
@@ -77,7 +77,7 @@ The clone is self-contained: the API pin and documented local compatibility prof
 
 ## Adapting this reference to your PSP
 
-Read [the integration guide](docs/psp-integration.md) and [architecture](docs/architecture.md). Implement your processor/wallet boundaries, agree on contract errata and callback routing with Uber, and add processor timeout/reconciliation tests before enabling external effects. There is intentionally no runnable real-money adapter, fabricated user authentication, production deployment or automatic settlement export.
+Read [the integration guide](docs/psp-integration.md) and [architecture](docs/architecture.md). Use the native [durable HTTP processor executor](docs/processor-executor.md) to exercise the network boundary against an independent local fixture, then map your actual processor/wallet systems to that boundary. Agree on contract errata and callback routing with Uber before external effects. There is intentionally no runnable real-money adapter, fabricated user authentication, production deployment or automatic settlement export.
 
 Several upstream examples disagree with their declared schemas. This repository records the differences in [contracts/errata.json](contracts/errata.json); it does not claim Uber approved its local profile. Partial capture and ambiguous cancelled lookup behavior are gated/documented, not silently invented.
 

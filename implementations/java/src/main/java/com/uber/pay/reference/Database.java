@@ -73,10 +73,18 @@ final class Database implements AutoCloseable {
   }
 
   <T> T atomic(Work<T> w) {
+    return transaction(w, true);
+  }
+
+  <T> T raw(Work<T> w) {
+    return transaction(w, false);
+  }
+
+  <T> T transaction(Work<T> w, boolean serialize) {
     try (Connection c = open()) {
       c.setAutoCommit(false);
       try {
-        execute(c, "SELECT pg_advisory_xact_lock(hashtext(?))", config.client);
+        if (serialize) execute(c, "SELECT pg_advisory_xact_lock(hashtext(?))", config.client);
         T result = w.run(c);
         c.commit();
         return result;

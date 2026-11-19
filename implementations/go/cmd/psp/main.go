@@ -26,6 +26,9 @@ func main() {
 	}
 	defer app.Close()
 	go app.RunWorkers(ctx)
+	if c.ProcessorMode == "http" {
+		go app.RunProcessor(ctx)
+	}
 	server := &http.Server{Addr: net.JoinHostPort(c.Host, c.Port), Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()

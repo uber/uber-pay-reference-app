@@ -23,6 +23,7 @@ class MockUber:
         self.events, self.tokens = [], {}
         self.faults = defaultdict(deque)
         self.token_requests = 0
+        self.barriers = defaultdict(deque)
         self.server = ThreadingHTTPServer((host, port), self.handler())
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -43,6 +44,14 @@ class MockUber:
     def fail_next(self, name, transaction_id, *statuses):
         with self.lock:
             self.faults[(name, transaction_id)].extend(statuses)
+
+    def block_callback(self, name, transaction_id):
+        from .processor_fixture import Barrier
+
+        barrier = Barrier()
+        with self.lock:
+            self.barriers[(name, transaction_id)].append(barrier)
+        return barrier
 
     def matching(self, name, transaction_id, accepted=True):
         with self.lock:
@@ -67,7 +76,10 @@ class MockUber:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
             def do_GET(self):
                 if urlsplit(self.path).path in ("/health", "/return"):
@@ -159,6 +171,15 @@ class MockUber:
                             "idempotency_key": self.headers.get("X-Idempotency-Key"),
                         }
                     )
+                with mock.lock:
+                    barrier = (
+                        mock.barriers[(name, transaction_id)].popleft()
+                        if mock.barriers[(name, transaction_id)]
+                        else None
+                    )
+                if barrier:
+                    barrier.entered.set()
+                    barrier.release.wait(timeout=12)
                 self.reply(status)
 
         return Handler

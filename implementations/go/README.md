@@ -33,6 +33,8 @@ The test runner builds this executable, creates an isolated client namespace, ge
 | `store.go` | PostgreSQL migration, identity, fake balances and durable job insertion |
 | `wallet.go` | Explicit local consent, single-use codes, three token grants and family revocation |
 | `worker.go` | Completion/expiry, six callback contracts, scoped tokens, leases and retries |
+| `processor.go` | Native encrypted-intent executor, private HTTP transport, reconciliation and versioned events |
+| `features.go` | Shared funding/reason/locale configuration |
 | `control.go` | Secret-protected, disabled-by-default conformance controls |
 
 `NewWithDependencies` permits local test providers to be injected without starting an HTTP listener. All public routes are rooted at `BASE_PATH`; `/health`, `/demo/consent`, `/demo/action`, and disabled-by-default `/_test/*` are separate local-only routes.
@@ -47,4 +49,4 @@ The callback worker performs network I/O outside database transactions. Callback
 
 ## Review-hardened local policies
 
-`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. See the root `docs/review-follow-up.md` for unsupported flows and pending owner decisions.
+`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. The native `ProcessorExecutor` is the separate HTTP boundary: see `docs/processor-executor.md` for encrypted intents, reservations, out-of-transaction dispatch, fenced finalization and provider-key recovery. It is runnable against the independent local fixture; nonlocal modes remain forbidden. Shared feature profiles include reversal/debt, deposit amount ordering, all reason triggers, funding aliases and bilingual consent/errors. See `docs/review-follow-up.md` for owner decisions and real-integration gates.

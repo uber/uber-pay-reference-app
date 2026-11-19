@@ -50,6 +50,12 @@ def main():
                 "operations",
                 "jobs",
                 "tokens",
+                "account_debts",
+                "refund_reversals",
+                "provider_intents",
+                "provider_keys",
+                "resource_claims",
+                "intent_reservations",
             }
             connection.execute((ROOT / "storage/migrations/001_down.sql").read_text())
             assert (

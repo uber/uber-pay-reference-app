@@ -12,6 +12,7 @@ final class WalletService {
   final Database db;
   final Contracts contracts;
   final WalletProvider provider;
+  final ReferenceFeatures features = new ReferenceFeatures();
 
   WalletService(Config c, Database d, Contracts ct, WalletProvider provider) {
     config = c;
@@ -112,6 +113,13 @@ final class WalletService {
         details);
     if (details.isEmpty())
       throw new ApiError(400, "invalid_request", "Authorization details required");
+    for (var detail : details) {
+      features.method(
+          detail.path("funding_method").asText(), detail.path("country_iso2").asText(), "");
+      if (detail.has("account_id") && !detail.path("account_id").asText().equals("demo-account"))
+        throw new ApiError(400, "invalid_request", "Unknown synthetic wallet");
+    }
+    String language = ReferenceFeatures.locale(details.get(0).path("locale").asText());
     WalletProvider.Identity identity = provider.identityForConsent();
     String consent = random(), csrf = random();
     db.atomic(
@@ -123,21 +131,56 @@ final class WalletService {
               identity.accountId(),
               scope,
               q.get("redirect_uri"),
-              Json.string(Json.obj("state", q.get("state"), "csrf", csrf)),
+              Json.string(
+                  Json.obj(
+                      "state",
+                      q.get("state"),
+                      "csrf",
+                      csrf,
+                      "details",
+                      details,
+                      "locale",
+                      language)),
               UUID.randomUUID().toString(),
               600);
           return null;
         });
-    return Reply.html(
-        "<!doctype html><html><head><title>Local demo consent</title></head><body><h1>Local fake"
-            + " wallet consent</h1><p>Authorize synthetic account demo-account. No real login or"
-            + " money movement.</p><form method='post' action='/demo/consent'><input type='hidden'"
+    StringBuilder methods = new StringBuilder();
+    for (var d : details)
+      methods
+          .append("<li>")
+          .append(ReferenceFeatures.html(features.text(language, "method")))
+          .append(": ")
+          .append(ReferenceFeatures.html(d.path("funding_method").asText()))
+          .append(" — ")
+          .append(ReferenceFeatures.html(features.text(language, "country")))
+          .append(": ")
+          .append(ReferenceFeatures.html(d.path("country_iso2").asText()))
+          .append("</li>");
+    return Ui.html(
+        "<!doctype html><html lang='"
+            + language
+            + "'><body><h1>"
+            + features.text(language, "consent_title")
+            + "</h1><p>"
+            + features.text(language, "synthetic")
+            + "</p><ul>"
+            + methods
+            + "</ul><p>"
+            + features.text(language, "scopes")
+            + ": "
+            + ReferenceFeatures.html(scope)
+            + "</p><form method='post' action='/demo/consent'><input type='hidden'"
             + " name='consent_token' value='"
             + consent
             + "'><input type='hidden' name='csrf' value='"
             + csrf
-            + "'><button name='decision' value='approve'>Approve</button><button name='decision'"
-            + " value='deny'>Deny</button></form></body></html>");
+            + "'><button name='decision' value='approve'>"
+            + features.text(language, "approve")
+            + "</button><button name='decision' value='deny'>"
+            + features.text(language, "deny")
+            + "</button></form></body></html>",
+        language);
   }
 
   Reply consent(Map<String, String> q) {
@@ -169,7 +212,8 @@ final class WalletService {
                 Database.str(r, "account_id"),
                 Database.str(r, "scope"),
                 uri,
-                null,
+                Json.string(
+                    Json.obj("details", state.path("details"), "locale", state.path("locale"))),
                 Database.str(r, "family_id"),
                 600);
             params = "code=" + PaymentService.enc(code);
@@ -197,6 +241,7 @@ final class WalletService {
                 acc = "demo-account",
                 scope = "",
                 family = UUID.randomUUID().toString();
+            String consentContext = null;
             if (grant.equals("authorization_code")) {
               var r =
                   Database.one(
@@ -220,6 +265,7 @@ final class WalletService {
               acc = Database.str(r, "account_id");
               scope = Database.str(r, "scope");
               family = Database.str(r, "family_id");
+              consentContext = Database.str(r, "state");
             } else if (grant.equals("refresh_token")) {
               var r =
                   Database.one(
@@ -237,7 +283,7 @@ final class WalletService {
                   Database.str(r, "account_id"),
                   Database.str(r, "scope"),
                   null,
-                  null,
+                  Database.str(r, "state"),
                   Database.str(r, "family_id"),
                   600);
               Reply out =
@@ -254,11 +300,34 @@ final class WalletService {
                       Json.text(b, "account_id"),
                       Json.text(b, "funding_method"),
                       Json.text(b, "country_iso2"));
+              consentContext =
+                  Json.string(
+                      Json.obj(
+                          "details",
+                          Json.MAPPER
+                              .createArrayNode()
+                              .add(
+                                  Json.obj(
+                                      "funding_method",
+                                      b.path("funding_method"),
+                                      "country_iso2",
+                                      b.path("country_iso2"))),
+                          "locale",
+                          "en-US"));
               acc = identity.accountId();
               scope = scopes(Json.text(b, "scope"));
             } else return Reply.json(400, Json.obj("error", "unsupported_grant_type"));
             String refresh = random();
-            put(c, refresh, "REFRESH", acc, scope, null, null, family, config.refreshTtlSeconds);
+            put(
+                c,
+                refresh,
+                "REFRESH",
+                acc,
+                scope,
+                null,
+                consentContext,
+                family,
+                config.refreshTtlSeconds);
             WalletProvider.Identity identity = provider.describeAccount(acc);
             JsonNode detail =
                 Json.obj(

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"crypto/rsa"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/url"
@@ -13,6 +14,10 @@ import (
 )
 
 type Config struct {
+	ProcessorPauseAfterPrepare                                                                bool
+	ProcessorMode, ProcessorURL, ProcessorToken, ProcessorKey                                 string
+	ProcessorTimeout, ProcessorLease, ProcessorWait, ProcessorPoll                            time.Duration
+	ProcessorMaxFailures                                                                      int
 	Host, Port, BasePath, DatabaseURL, ClientID, ClientSecret, UberClientID, UberClientSecret string
 	PublicBaseURL, CallbackBaseURL, TokenURL                                                  string
 	Redirects                                                                                 map[string]bool
@@ -46,7 +51,7 @@ func LocalURL(s string) error {
 		return errors.New("local URLs require HTTP with no credentials/query/fragment")
 	}
 	switch strings.ToLower(u.Hostname()) {
-	case "localhost", "127.0.0.1", "::1", "mock-uber":
+	case "localhost", "127.0.0.1", "::1", "mock-uber", "processor":
 		return nil
 	}
 	return errors.New("nonlocal outbound host refused")
@@ -55,6 +60,35 @@ func LoadConfig() (Config, error) {
 	c := Config{}
 	if env("MODE", "local") != "local" {
 		return c, errors.New("only synthetic local mode is implemented; sandbox/live requires a reviewed real adapter")
+	}
+	c.ProcessorMode = env("PROCESSOR_MODE", "local")
+	if c.ProcessorMode != "local" && c.ProcessorMode != "http" {
+		return c, errors.New("invalid PROCESSOR_MODE")
+	}
+	c.ProcessorURL = strings.TrimRight(env("PROCESSOR_URL", "http://127.0.0.1:9080"), "/")
+	if e := LocalURL(c.ProcessorURL); e != nil {
+		return c, e
+	}
+	c.ProcessorToken = env("PROCESSOR_AUTH_TOKEN", "")
+	c.ProcessorKey = env("PROCESSOR_STATE_KEY", "")
+	stateKey, ke := base64.StdEncoding.DecodeString(c.ProcessorKey)
+	if c.ProcessorMode == "http" && (len(c.ProcessorToken) < 32 || ke != nil || len(stateKey) != 32) {
+		return c, errors.New("HTTP processor requires explicit credentials and persistent 256-bit state key")
+	}
+	for _, item := range []struct {
+		k, d string
+		p    *time.Duration
+	}{{"PROCESSOR_TIMEOUT_MS", "2000", &c.ProcessorTimeout}, {"PROCESSOR_LEASE_MS", "15000", &c.ProcessorLease}, {"PROCESSOR_WAIT_MS", "250", &c.ProcessorWait}, {"PROCESSOR_POLL_MS", "200", &c.ProcessorPoll}} {
+		var e error
+		*item.p, e = duration(item.k, item.d, time.Millisecond)
+		if e != nil {
+			return c, e
+		}
+	}
+	var pe error
+	c.ProcessorMaxFailures, pe = strconv.Atoi(env("PROCESSOR_MAX_FAILURES", "8"))
+	if pe != nil || c.ProcessorMaxFailures < 1 {
+		return c, errors.New("invalid processor budget")
 	}
 	c.Host = env("HOST", "127.0.0.1")
 	c.Port = env("PORT", "8080")
@@ -116,6 +150,7 @@ func LoadConfig() (Config, error) {
 	if e != nil || c.MaxAttempts < 1 || c.MaxAttempts > 100 {
 		return c, errors.New("invalid callback attempt limit")
 	}
+	c.ProcessorPauseAfterPrepare = env("ENABLE_TEST_CONTROL", "false") == "true" && env("PROCESSOR_TEST_PAUSE_AFTER_PREPARE", "false") == "true"
 	c.TestControl = env("ENABLE_TEST_CONTROL", "false") == "true"
 	c.TestSecret = env("TEST_CONTROL_SECRET", "")
 	if c.TestControl && len(c.TestSecret) < 16 {

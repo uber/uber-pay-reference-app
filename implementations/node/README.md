@@ -27,6 +27,8 @@ all languages are in `contracts/implementation-profile.json`.
 - `service.ts`: idempotency, transaction states, synthetic ledger and wallet grants.
 - `store.ts`: PostgreSQL migration, seed and per-client advisory transactions.
 - `worker.ts`: restart-safe synthetic completion and callback delivery outside locks.
+- `processor.ts`: encrypted durable HTTP intents, reservations, lookup recovery and versioned events.
+- `features.ts`: shared funding/reason/locale configuration.
 - `adapter.ts`: explicit local-only synthetic processor interface.
 
 ## Safety boundary
@@ -39,8 +41,8 @@ bundled.
 The local adapter's methods run within the same PostgreSQL transaction as the
 synthetic ledger and must remain in-process and network-free. Do **not** replace
 one with a real HTTP payment call inside that transaction. Integrating a real PSP
-requires a durable provider-intent/reconciliation executor outside the database
-lock, a real wallet identity/consent provider, key/secret provisioning, environment
+uses the supplied native provider-intent/reconciliation executor outside the database
+lock and additionally requires a real wallet identity/consent provider, key/secret provisioning, environment
 and contract-errata review, and independent sandbox qualification.
 
 The default refresh grant intentionally obtains an access token without
@@ -49,4 +51,4 @@ not claimed by this local reference example.
 
 ## Review-hardened local policies
 
-`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. See the root `docs/review-follow-up.md` for unsupported flows and pending owner decisions.
+`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. The native `ProcessorExecutor` is the separate HTTP boundary: see `docs/processor-executor.md` for encrypted intents, reservations, out-of-transaction dispatch, fenced finalization and provider-key recovery. It is runnable against the independent local fixture; nonlocal modes remain forbidden. Shared feature profiles include reversal/debt, deposit amount ordering, all reason triggers, funding aliases and bilingual consent/errors. See `docs/review-follow-up.md` for owner decisions and real-integration gates.

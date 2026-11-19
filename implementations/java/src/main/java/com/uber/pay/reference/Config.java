@@ -6,6 +6,8 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.*;
 
 final class Config {
+  final String processorMode, processorUrl, processorToken, processorKey;
+  final int processorTimeout, processorLease, processorWait, processorPoll, processorMaxFailures;
   final String host,
       base,
       db,
@@ -19,7 +21,7 @@ final class Config {
       publicBase,
       controlSecret;
   final int port, skew, delay, interval, maxAttempts, retryMs, actionTtlMs, refreshTtlSeconds;
-  final boolean controls, oauthRequired, strictAccountName;
+  final boolean controls, oauthRequired, strictAccountName, processorPauseAfterPrepare;
   final Set<String> redirects;
   final Path contract, migration;
   final SignatureVerifier signatures;
@@ -29,6 +31,22 @@ final class Config {
       throw new IllegalArgumentException(
           "Only isolated local mode is supported; supply reviewed real adapters before sandbox"
               + " use");
+    processorMode = get(env, "PROCESSOR_MODE", "local");
+    if (!Set.of("local", "http").contains(processorMode))
+      throw new IllegalArgumentException("Invalid PROCESSOR_MODE");
+    processorUrl = get(env, "PROCESSOR_URL", "http://127.0.0.1:9080").replaceAll("/+$", "");
+    localUrl(processorUrl);
+    processorToken = get(env, "PROCESSOR_AUTH_TOKEN", "");
+    processorKey = get(env, "PROCESSOR_STATE_KEY", "");
+    if (processorMode.equals("http")
+        && (processorToken.length() < 32 || Base64.getDecoder().decode(processorKey).length != 32))
+      throw new IllegalArgumentException(
+          "HTTP processor requires explicit credentials and persistent 256-bit state key");
+    processorTimeout = num(env, "PROCESSOR_TIMEOUT_MS", 2000, 1, 60000);
+    processorLease = num(env, "PROCESSOR_LEASE_MS", 15000, 1, 60000);
+    processorWait = num(env, "PROCESSOR_WAIT_MS", 250, 1, 60000);
+    processorPoll = num(env, "PROCESSOR_POLL_MS", 200, 1, 60000);
+    processorMaxFailures = num(env, "PROCESSOR_MAX_FAILURES", 8, 1, 1000);
     host = get(env, "HOST", "127.0.0.1");
     port = num(env, "PORT", 8080, 1, 65535);
     base = get(env, "BASE_PATH", "/uberpay/v1");
@@ -62,6 +80,9 @@ final class Config {
     actionTtlMs = num(env, "ACTION_TTL_MS", 600000, 1, 3600000);
     refreshTtlSeconds = num(env, "REFRESH_TOKEN_TTL_SECONDS", 2592000, 1, 31536000);
     strictAccountName = get(env, "STRICT_ACCOUNT_NAME", "false").equals("true");
+    processorPauseAfterPrepare =
+        get(env, "ENABLE_TEST_CONTROL", "false").equals("true")
+            && get(env, "PROCESSOR_TEST_PAUSE_AFTER_PREPARE", "false").equals("true");
     controls = get(env, "ENABLE_TEST_CONTROL", "false").equals("true");
     controlSecret = get(env, "TEST_CONTROL_SECRET", "");
     if (controls && controlSecret.length() < 16)
@@ -98,8 +119,10 @@ final class Config {
     if (!Set.of("http", "https").contains(u.getScheme())
         || u.getUserInfo() != null
         || u.getFragment() != null
+        || u.getQuery() != null
         || u.getHost() == null
-        || !Set.of("localhost", "127.0.0.1", "::1", "[::1]", "mock-uber").contains(u.getHost()))
+        || !Set.of("localhost", "127.0.0.1", "::1", "[::1]", "mock-uber", "processor")
+            .contains(u.getHost()))
       throw new IllegalArgumentException("Local mode refuses nonlocal outbound URL");
   }
 }

@@ -19,10 +19,12 @@ import (
 )
 
 type Reply struct {
-	Status int
-	Body   string
+	Status  int
+	Body    string
+	Headers map[string]string
 }
 type App struct {
+	Features ReferenceFeatures
 	Config   Config
 	Store    *Store
 	Contract Contract
@@ -55,26 +57,35 @@ func NewWithDependencies(ctx context.Context, c Config, adapter PspAdapter, wall
 		schema := object(object(object(v)["components"])["schemas"])["Account"]
 		object(schema)["required"] = append(object(schema)["required"].([]any), "name")
 	}
+	features, e := LoadFeatures()
+	if e != nil {
+		return nil, e
+	}
 	store, e := OpenStore(ctx, c)
 	if e != nil {
 		return nil, e
 	}
-	return &App{Config: c, Store: store, Contract: Contract{Spec: object(v)}, Tokens: &UberTokenProvider{entries: map[string]cachedToken{}}, Client: httpClient(), Adapter: adapter, Wallet: wallet}, nil
+	return &App{Features: features, Config: c, Store: store, Contract: Contract{Spec: object(v)}, Tokens: &UberTokenProvider{entries: map[string]cachedToken{}}, Client: httpClient(), Adapter: adapter, Wallet: wallet}, nil
 }
 func (a *App) Close() { a.Store.Pool.Close() }
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Language", locale(r.Header.Get("Accept-Language")))
 	defer func() {
 		if recover() != nil {
 			log.Print("request failure")
 			http.Error(w, "", 500)
 		}
 	}()
+	if r.URL.Path == "/adapter/events" {
+		a.processorEvent(w, r)
+		return
+	}
 	if r.URL.Path == "/health" {
 		if a.Store.Pool.Ping(r.Context()) != nil {
 			w.WriteHeader(503)
 			return
 		}
-		a.write(w, Reply{200, `{"status":"ok","language":"go"}`})
+		a.write(w, Reply{200, `{"status":"ok","language":"go"}`, nil})
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/_test/") {
@@ -177,58 +188,119 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.write(w, a.failure(pattern, status, "VALIDATION_ERROR"))
 		return
 	}
-	mutating := op == "charge" || op == "capture" || op == "cancel" || op == "initRefund" || op == "payout"
-	key := r.Header.Get("X-Idempotency-Key")
-	hash := fingerprint(path + ":" + encode(body))
-	if mutating {
-		if key == "" || len(key) > 256 {
-			a.write(w, a.failure(pattern, 400, "VALIDATION_ERROR"))
+	mutating := moneyOperation(op)
+	if mutating && a.Config.ProcessorMode == "http" {
+		if e = tx.Commit(ctx); e != nil {
+			a.write(w, a.failure(pattern, 500, ""))
 			return
 		}
-		var oldhash, oldbody string
-		var status int
-		e = tx.QueryRow(ctx, "SELECT fingerprint,status,response_body FROM operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3", a.Config.ClientID, op, key).Scan(&oldhash, &status, &oldbody)
-		if e == nil {
-			if oldhash != hash {
-				a.write(w, a.failure(pattern, map[bool]int{true: 409, false: 400}[op == "payout"], map[bool]string{true: "DUPLICATE_REQUEST_ERROR", false: "VALIDATION_ERROR"}[op == "payout"]))
-			} else {
-				a.write(w, Reply{status, oldbody})
-			}
-			return
+		reply, err := a.processorExecute(r, pattern, op, id, body)
+		if err != nil {
+			a.write(w, a.failure(pattern, 500, ""))
+		} else {
+			a.write(w, reply)
 		}
-		if !notFound(e) {
-			a.write(w, a.failure(pattern, 500, "PAYMENT_PSP_ERROR"))
-			return
-		}
-	}
-	reply, e := a.execute(ctx, tx, op, id, body, r, hash)
-	if e != nil {
-		log.Printf("database operation failed (%s)", op)
-		a.write(w, a.failure(pattern, 500, "PAYMENT_PSP_ERROR"))
 		return
 	}
-	if reply.Body != "" {
-		value, e := DecodeJSON([]byte(reply.Body))
-		if e != nil || a.Contract.Response(pattern, strings.ToLower(r.Method), reply.Status, value) != nil {
-			log.Printf("response contract failure (%s)", op)
-			a.write(w, a.failure(pattern, 500, "PAYMENT_PSP_ERROR"))
-			return
-		}
-	}
-	if mutating && reply.Status < 500 {
-		_, e = tx.Exec(ctx, "INSERT INTO operations(client_id,operation_name,idem_key,fingerprint,status,response_body,tx_id) VALUES($1,$2,$3,$4,$5,$6,$7)", a.Config.ClientID, op, key, hash, reply.Status, reply.Body, str(body, "id"))
-		if e != nil {
-			a.write(w, a.failure(pattern, 500, "PAYMENT_PSP_ERROR"))
-			return
-		}
+	reply, e := a.operationTx(ctx, tx, pattern, op, id, body, r)
+	if e != nil {
+		log.Printf("database operation failed (%s)", op)
+		a.write(w, a.failure(pattern, 500, ""))
+		return
 	}
 	if e = tx.Commit(ctx); e != nil {
-		a.write(w, a.failure(pattern, 500, "PAYMENT_PSP_ERROR"))
+		a.write(w, a.failure(pattern, 500, ""))
 		return
 	}
 	a.write(w, reply)
 }
+func moneyOperation(op string) bool {
+	return op == "charge" || op == "capture" || op == "cancel" || op == "initRefund" || op == "payout"
+}
+func resourceKey(op, id string, b Object) string {
+	if op == "payout" {
+		return "payout:" + str(b, "id")
+	}
+	if op == "initRefund" {
+		return "charge:" + str(b, "original_transaction_id")
+	}
+	if op == "capture" || op == "cancel" {
+		return "charge:" + id
+	}
+	return "charge:" + str(b, "id")
+}
+func (a *App) operationTx(ctx context.Context, tx pgx.Tx, pattern, op, id string, body Object, r *http.Request) (Reply, error) {
+	mutating := moneyOperation(op)
+	key := r.Header.Get("X-Idempotency-Key")
+	hash := fingerprint(strings.TrimPrefix(r.URL.EscapedPath(), a.Config.BasePath) + ":" + encode(body))
+	if mutating {
+		if key == "" || len(key) > 256 {
+			return a.failure(pattern, 400, "VALIDATION_ERROR"), nil
+		}
+		var oldhash, oldbody string
+		var oldheaders []byte
+		var status int
+		err := tx.QueryRow(ctx, "SELECT fingerprint,status,response_body,response_headers FROM operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3", a.Config.ClientID, op, key).Scan(&oldhash, &status, &oldbody, &oldheaders)
+		if err == nil {
+			if oldhash != hash {
+				return a.failure(pattern, map[bool]int{true: 409, false: 400}[op == "payout"], map[bool]string{true: "DUPLICATE_REQUEST_ERROR", false: "VALIDATION_ERROR"}[op == "payout"]), nil
+			}
+			var headers map[string]string
+			if e := json.Unmarshal(oldheaders, &headers); e != nil {
+				return Reply{}, e
+			}
+			return Reply{status, oldbody, headers}, nil
+		}
+		if !notFound(err) {
+			return Reply{}, err
+		}
+		if _, err = tx.Exec(ctx, "SELECT reference_assert_unclaimed($1,$2)", a.Config.ClientID, resourceKey(op, id, body)); err != nil {
+			return Reply{}, err
+		}
+	}
+	reply, err := a.execute(ctx, tx, op, id, body, r, hash)
+	if err != nil {
+		return Reply{}, err
+	}
+	reply.Headers = map[string]string{"Content-Language": locale(r.Header.Get("Accept-Language"))}
+	if reply.Status >= 400 && reply.Body != "" {
+		v, e := DecodeJSON([]byte(reply.Body))
+		if e != nil {
+			return Reply{}, e
+		}
+		out := object(v)
+		out["error_description"] = a.Features.Text(reply.Headers["Content-Language"], "invalid_request")
+		reply.Body = encode(out)
+	}
+	if reply.Body != "" {
+		v, err := DecodeJSON([]byte(reply.Body))
+		if err != nil {
+			return Reply{}, err
+		}
+		if err = a.Contract.Response(pattern, strings.ToLower(r.Method), reply.Status, v); err != nil {
+			return Reply{}, err
+		}
+	}
+	if mutating && reply.Status < 500 {
+		_, err = tx.Exec(ctx, "INSERT INTO operations(client_id,operation_name,idem_key,fingerprint,status,response_body,tx_id,response_headers) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)", a.Config.ClientID, op, key, hash, reply.Status, reply.Body, str(body, "id"), encode(reply.Headers))
+	}
+	return reply, err
+}
+
 func (a *App) write(w http.ResponseWriter, r Reply) {
+	for k, v := range r.Headers {
+		w.Header().Set(k, v)
+	}
+	if r.Status >= 400 && r.Body != "" {
+		v, err := DecodeJSON([]byte(r.Body))
+		if err == nil {
+			body := object(v)
+			if _, present := body["error_description"]; !present {
+				body["error_description"] = a.Features.Text(w.Header().Get("Content-Language"), "invalid_request")
+			}
+			r.Body = encode(body)
+		}
+	}
 	if r.Body != "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
@@ -287,7 +359,7 @@ func (a *App) failure(path string, status int, detail string) Reply {
 		if !allowed[detail] {
 			detail = "invalid_request"
 		}
-		return Reply{400, encode(Object{"error": detail})}
+		return Reply{400, encode(Object{"error": detail}), nil}
 	}
 	if ref := str(response, "$ref"); ref != "" {
 		response = a.Contract.resolve(ref)
@@ -296,7 +368,7 @@ func (a *App) failure(path string, status int, detail string) Reply {
 	if len(schema) == 0 {
 		return Reply{Status: status}
 	}
-	return Reply{status, encode(Object{"detail": detail})}
+	return Reply{status, encode(Object{"detail": detail}), nil}
 }
 func amount(o Object) (int64, string, error) {
 	v, e := number(o["value"])
@@ -306,23 +378,30 @@ func amount(o Object) (int64, string, error) {
 	}
 	return v, cur, nil
 }
-func knownFunding(s string) bool {
-	switch s {
-	case "DEMO_SYNC", "DEMO_CAPTURE_HARD", "DEMO_CAPTURE_SOFT", "DEMO_REJECT", "DEMO_PENDING", "DEMO_PENDING_REJECT", "DEMO_WEBVIEW", "DEMO_QR":
-		return true
+func knownFunding(code string) bool {
+	f, e := LoadFeatures()
+	if e != nil {
+		return false
 	}
-	return false
+	_, e = f.Method(code, "", "")
+	return e == nil
 }
+
 func (a *App) execute(ctx context.Context, tx pgx.Tx, op, id string, b Object, r *http.Request, hash string) (Reply, error) {
 	switch op {
 	case "charge", "payout":
-		return a.create(ctx, tx, op, b, hash)
+		return a.create(ctx, tx, op, b, hash, locale(r.Header.Get("Accept-Language")))
 	case "capture", "cancel":
 		return a.finishManual(ctx, tx, op, id, b)
 	case "initRefund":
 		return a.refund(ctx, tx, b, hash)
 	case "getBalance":
-		av, bal, e := accountBalance(ctx, tx, a.Config.ClientID, str(b, "account_id"), "BRL")
+		p, err := a.Features.Method(str(b, "funding_method"), str(b, "country_iso2"), "")
+		if err != nil {
+			return a.failure("/balance", 400, "VALIDATION_ERROR"), nil
+		}
+		cur := p["currencies"].([]any)[0].(string)
+		av, bal, e := accountBalance(ctx, tx, a.Config.ClientID, str(b, "account_id"), cur)
 		if notFound(e) {
 			return a.failure("/balance", 404, ""), nil
 		}
@@ -335,14 +414,18 @@ func (a *App) execute(ctx context.Context, tx pgx.Tx, op, id string, b Object, r
 		if err := validatePaymentData(b, 0); err != nil {
 			return a.failure("/balance", 400, "VALIDATION_ERROR"), nil
 		}
-		result, err := a.Adapter.GetBalance(ctx, BalanceQuery{Request: b, Account: str(b, "account_id"), Currency: "BRL", AvailableE5: av, BalanceE5: bal})
+		result, err := a.Adapter.GetBalance(ctx, BalanceQuery{Request: b, Account: str(b, "account_id"), Currency: cur, AvailableE5: av, BalanceE5: bal})
 		if err != nil {
 			return Reply{}, err
 		}
 		if result.AvailableE5 < 0 || result.BalanceE5 < result.AvailableE5 {
 			return Reply{}, errors.New("invalid adapter balance")
 		}
-		return Reply{200, encode(Object{"available_balance": Object{"value": result.AvailableE5, "currency": result.Currency}, "balance": Object{"value": result.BalanceE5, "currency": result.Currency}})}, nil
+		out := Object{"available_balance": Object{"value": result.AvailableE5, "currency": result.Currency}, "balance": Object{"value": result.BalanceE5, "currency": result.Currency}}
+		if p["itemized"] == true {
+			out["itemized_balances"] = []any{Object{"display_name": "Meal voucher", "available_balance": out["available_balance"], "balance": out["balance"]}}
+		}
+		return Reply{200, encode(out), nil}, nil
 	case "findTransaction":
 		id = r.URL.Query().Get("id")
 		if id == "" || len(r.URL.Query()["id"]) != 1 {
@@ -373,11 +456,11 @@ func (a *App) execute(ctx context.Context, tx pgx.Tx, op, id string, b Object, r
 		if t.State == "CONFIRMED" {
 			out["confirmed_at"] = t.Updated.UTC().Format(time.RFC3339Nano)
 		}
-		return Reply{200, encode(out)}, nil
+		return Reply{200, encode(out), nil}, nil
 	}
 	return Reply{Status: 404}, nil
 }
-func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash string) (Reply, error) {
+func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash string, language string) (Reply, error) {
 	path := "/" + kind
 	id := str(b, "id")
 	if id == "" || len(id) > 512 {
@@ -386,7 +469,7 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 	old, e := getTransaction(ctx, tx, a.Config.ClientID, kind, id)
 	if e == nil {
 		if old.Hash == hash {
-			return Reply{old.Status, old.Response}, nil
+			return Reply{old.Status, old.Response, nil}, nil
 		}
 		return a.failure(path, map[bool]int{true: 409, false: 400}[kind == "payout"], map[bool]string{true: "DUPLICATE_REQUEST_ERROR", false: "VALIDATION_ERROR"}[kind == "payout"]), nil
 	}
@@ -395,11 +478,12 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 	}
 	n, currency, e := amount(object(b["amount"]))
 	funding := str(b, "funding_method")
+	profile, profileError := a.Features.Method(funding, str(b, "country_iso2"), currency)
 	capture := str(b, "capture_method")
 	if capture == "" {
 		capture = "AUTOMATIC"
 	}
-	if e != nil || !knownFunding(funding) || capture == "MANUAL" && strings.HasPrefix(funding, "DEMO_PENDING") || capture == "MANUAL" && (funding == "DEMO_WEBVIEW" || funding == "DEMO_QR") {
+	if e != nil || profileError != nil || capture == "MANUAL" && (str(profile, "behavior") == "pending" || str(profile, "behavior") == "pending_reject" || str(profile, "behavior") == "webview" || str(profile, "behavior") == "qr") {
 		return a.failure(path, 400, "VALIDATION_ERROR"), nil
 	}
 	account := "demo-account"
@@ -431,6 +515,21 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 		return Reply{}, e
 	}
 	t := Transaction{Kind: kind, ID: id, Ref: "psp-" + fingerprint(kind + ":" + id)[:24], Account: account, Amount: n, Currency: currency, Capture: capture, Funding: funding, Hash: hash, Status: 200, State: "CONFIRMED"}
+	if detail := str(profile, "detail"); detail != "" {
+		key := "charge_reasons"
+		if kind == "payout" {
+			key = "payout_reasons"
+		}
+		valid := false
+		for _, code := range a.Features.Data[key].([]any) {
+			if code == detail {
+				valid = true
+			}
+		}
+		if !valid {
+			return a.failure(path, 400, "VALIDATION_ERROR"), nil
+		}
+	}
 	command := PaymentCommand{Request: b, ID: id, Account: account, Currency: currency, FundingMethod: funding, CaptureMethod: capture, ProviderKey: fingerprint(a.Config.ClientID + ":" + kind + ":" + id), AmountE5: n, AvailableE5: available}
 	if err := validatePaymentData(b, n); err != nil {
 		return a.failure(path, 400, "VALIDATION_ERROR"), nil
@@ -446,7 +545,11 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 	}
 	t.State, t.Detail = result.State, result.Detail
 	if kind == "payout" && t.State == "REJECTED" {
-		return a.failure(path, 400, t.Detail), nil
+		status := 422
+		if t.Detail == "VALIDATION_ERROR" || t.Detail == "INVALID_PAYMENT_DETAILS_ERROR" || t.Detail == "INSUFFICIENT_BALANCE" {
+			status = 400
+		}
+		return a.failure(path, status, t.Detail), nil
 	}
 
 	wire := t.State
@@ -459,18 +562,19 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 	}
 	out := Object{"state": state, "psp_reference": t.Ref}
 	actionToken := ""
-	if kind == "charge" && t.State == "PENDING" && (funding == "DEMO_WEBVIEW" || funding == "DEMO_QR") {
-		actionToken, e = a.putToken(ctx, tx, "ACTION", account, "", "", encode(Object{"id": id, "kind": kind}), a.Config.ActionTTL)
+	if a.Config.ProcessorMode != "http" && kind == "charge" && t.State == "PENDING" && (str(profile, "behavior") == "webview" || str(profile, "behavior") == "qr") {
+		actionToken, e = a.putToken(ctx, tx, "ACTION", account, "", "", encode(Object{"id": id, "kind": kind, "locale": language, "profile": profile}), a.Config.ActionTTL)
 		if e != nil {
 			return Reply{}, e
 		}
 	}
-	if actionToken != "" && funding == "DEMO_WEBVIEW" {
+	if actionToken != "" && str(profile, "behavior") == "webview" {
 		out["actions"] = []any{Object{"type": "web_view_user_input_action", "url": strings.TrimSuffix(a.Config.PublicBaseURL, a.Config.BasePath) + "/demo/action?token=" + urlQueryEscape(actionToken)}}
 	}
-	if actionToken != "" && funding == "DEMO_QR" {
+	if actionToken != "" && str(profile, "behavior") == "qr" {
 		out["actions"] = []any{Object{"type": "qr_code_input_action", "code": "local-qr:" + actionToken, "expiry_time_millis": time.Now().Add(a.Config.ActionTTL).UnixMilli()}}
 	}
+	t.Profile = encode(profile)
 	t.Source = str(object(b["source"]), "id")
 	if kind == "payout" {
 		t.Source = account
@@ -508,12 +612,12 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 			status = "WAITING"
 		}
 		state := "CONFIRMED"
-		if funding == "DEMO_PENDING_REJECT" {
-			state = "REJECTED"
+		if result.FinalState != "" {
+			state = result.FinalState
 		}
-		e = queue(ctx, tx, a.Config.ClientID, kind, id, "COMPLETION", "", Object{"state": state, "return_url": str(b, "return_url"), "expires_at": time.Now().Add(a.Config.ActionTTL).UnixMilli()}, status, a.Config.AsyncDelay)
+		e = queue(ctx, tx, a.Config.ClientID, kind, id, "COMPLETION", "", Object{"state": state, "detail": result.FinalDetail, "profile": profile, "locale": language, "return_url": str(b, "return_url"), "expires_at": time.Now().Add(a.Config.ActionTTL).UnixMilli()}, status, a.Config.AsyncDelay)
 	}
-	return Reply{200, t.Response}, e
+	return Reply{200, t.Response, nil}, e
 }
 func (a *App) finishManual(ctx context.Context, tx pgx.Tx, op, id string, b Object) (Reply, error) {
 	path := "/charge/{id}/" + op
@@ -529,7 +633,11 @@ func (a *App) finishManual(ctx context.Context, tx pgx.Tx, op, id string, b Obje
 	if e != nil && t.State == "AUTHORIZED" {
 		return Reply{}, e
 	}
-	if expired && t.State == "AUTHORIZED" {
+	var claimed bool
+	if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM resource_claims WHERE client_id=$1 AND resource_key=$2)", a.Config.ClientID, "charge:"+id).Scan(&claimed); e != nil {
+		return Reply{}, e
+	}
+	if expired && t.State == "AUTHORIZED" && !claimed {
 		if e = a.cancelAuthorization(ctx, tx, t); e != nil {
 			return Reply{}, e
 		}
@@ -594,7 +702,7 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 	old, e := getTransaction(ctx, tx, a.Config.ClientID, "refund", id)
 	if e == nil {
 		if old.Hash == hash {
-			return Reply{old.Status, old.Response}, nil
+			return Reply{old.Status, old.Response, nil}, nil
 		}
 		return Reply{Status: 400}, nil
 	}
@@ -628,7 +736,7 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 	if balance > math.MaxInt64-n {
 		return Reply{Status: 400}, nil
 	}
-	t := Transaction{Source: original.Source, Kind: "refund", ID: id, Ref: "psp-" + fingerprint("refund:" + id)[:24], Original: original.ID, Account: original.Account, Amount: n, Currency: c, Capture: "AUTOMATIC", Funding: original.Funding, State: "CONFIRMED", Hash: hash, Status: 201}
+	t := Transaction{Source: original.Source, Profile: original.Profile, Kind: "refund", ID: id, Ref: "psp-" + fingerprint("refund:" + id)[:24], Original: original.ID, Account: original.Account, Amount: n, Currency: c, Capture: "AUTOMATIC", Funding: original.Funding, State: "CONFIRMED", Hash: hash, Status: 201}
 	result, err := a.Adapter.Refund(ctx, PaymentCommand{Request: b, ID: id, Account: original.Account, Currency: c, FundingMethod: original.Funding, ProviderKey: fingerprint(a.Config.ClientID + ":refund:" + id), AmountE5: n})
 	if err != nil {
 		return Reply{}, err
@@ -640,10 +748,10 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 	}
 	if t.State == "CONFIRMED" {
 		e = adjust(ctx, tx, a.Config.ClientID, t.Account, c, n, n)
-	} else {
-		e = queue(ctx, tx, a.Config.ClientID, "refund", id, "COMPLETION", "", Object{"state": "CONFIRMED"}, "PENDING", a.Config.AsyncDelay)
+	} else if t.State == "PENDING" {
+		e = queue(ctx, tx, a.Config.ClientID, "refund", id, "COMPLETION", "", Object{"state": map[bool]string{true: result.FinalState, false: "CONFIRMED"}[result.FinalState != ""], "detail": result.FinalDetail}, "PENDING", a.Config.AsyncDelay)
 	}
-	return Reply{201, t.Response}, e
+	return Reply{201, t.Response, nil}, e
 }
 
 var errBearer = errors.New("invalid bearer token")

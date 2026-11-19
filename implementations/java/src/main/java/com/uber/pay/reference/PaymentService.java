@@ -13,6 +13,7 @@ final class PaymentService {
   final Database db;
   final Contracts contracts;
   final PspAdapter adapter;
+  final ReferenceFeatures features = new ReferenceFeatures();
 
   PaymentService(Config c, Database d, Contracts ct, PspAdapter a) {
     config = c;
@@ -52,67 +53,123 @@ final class PaymentService {
       String idem,
       JsonNode body,
       Map<String, String> query) {
-    return db.atomic(
-        c -> {
-          String fingerprint = Json.hash(resource + "\n" + Json.string(Json.canonical(body)));
-          if (idem != null) {
-            if (idem.isBlank() || idem.length() > 256)
-              throw new ApiError(400, "VALIDATION_ERROR", "Invalid idempotency key");
-            var old =
-                Database.one(
-                    c,
-                    "SELECT * FROM operations WHERE client_id=? AND operation_name=? AND"
-                        + " idem_key=?",
-                    config.client,
-                    operation,
-                    idem);
-            if (old != null) {
-              if (!Database.str(old, "fingerprint").equals(fingerprint))
-                return error(
-                    template,
-                    new ApiError(
-                        template.equals("/payout") ? 409 : 400,
-                        template.equals("/payout") ? "DUPLICATE_REQUEST_ERROR" : "VALIDATION_ERROR",
-                        "Idempotency key reused with a different request"));
-              return Reply.replay(old);
-            }
-          }
-          Savepoint sp = c.setSavepoint();
-          Reply r;
-          try {
-            r =
-                switch (operation) {
-                  case "charge" -> create(c, "charge", body, fingerprint);
-                  case "payout" -> create(c, "payout", body, fingerprint);
-                  case "capture" -> capture(c, resource, body);
-                  case "cancel" -> cancel(c, resource, body);
-                  case "findTransaction" -> find(c, query);
-                  case "initRefund" -> refund(c, body, fingerprint);
-                  case "getBalance" -> balance(c, body);
-                  default -> throw new ApiError(404, "not_found", "Unknown route");
-                };
-            if (!r.body().isEmpty())
-              contracts.response(template, r.status(), Json.parse(r.body()), "");
-          } catch (ApiError e) {
-            c.rollback(sp);
-            r = error(template, e);
-          }
-          if (idem != null && r.status() < 500)
-            Database.execute(
-                c,
-                "INSERT INTO"
-                    + " operations(client_id,operation_name,idem_key,fingerprint,status,response_body,response_headers,tx_id)"
-                    + " VALUES(?,?,?,?,?,?,?::jsonb,?)",
-                config.client,
-                operation,
-                idem,
-                fingerprint,
-                r.status(),
-                r.body(),
-                Json.string(r.headers()),
-                Json.text(body, "id"));
-          return r;
-        });
+    return execute(operation, template, resource, idem, body, query, "en-US");
+  }
+
+  Reply execute(
+      String operation,
+      String template,
+      String resource,
+      String idem,
+      JsonNode body,
+      Map<String, String> query,
+      String language) {
+    return db.atomic(c -> executeTx(c, operation, template, resource, idem, body, query, language));
+  }
+
+  static String resourceKey(String operation, String resource, JsonNode body) {
+    if (operation.equals("payout")) return "payout:" + Json.text(body, "id");
+    if (operation.equals("initRefund"))
+      return "charge:" + Json.text(body, "original_transaction_id");
+    if (Set.of("capture", "cancel").contains(operation)) {
+      String[] parts = resource.split("/");
+      return "charge:"
+          + java.net.URLDecoder.decode(
+              parts[parts.length - 2].replace("+", "%2B"), StandardCharsets.UTF_8);
+    }
+    return "charge:" + Json.text(body, "id");
+  }
+
+  Reply executeTx(
+      Connection c,
+      String operation,
+      String template,
+      String resource,
+      String idem,
+      JsonNode body,
+      Map<String, String> query,
+      String language)
+      throws Exception {
+
+    String fingerprint = Json.hash(resource + "\n" + Json.string(Json.canonical(body)));
+    if (idem != null) {
+      if (idem.isBlank() || idem.length() > 256)
+        throw new ApiError(400, "VALIDATION_ERROR", "Invalid idempotency key");
+      var old =
+          Database.one(
+              c,
+              "SELECT * FROM operations WHERE client_id=? AND operation_name=? AND" + " idem_key=?",
+              config.client,
+              operation,
+              idem);
+      if (old != null) {
+        if (!Database.str(old, "fingerprint").equals(fingerprint))
+          return error(
+              template,
+              new ApiError(
+                  template.equals("/payout") ? 409 : 400,
+                  template.equals("/payout") ? "DUPLICATE_REQUEST_ERROR" : "VALIDATION_ERROR",
+                  "Idempotency key reused with a different request"));
+        return Reply.replay(old);
+      }
+    }
+    if (idem != null)
+      Database.execute(
+          c,
+          "SELECT reference_assert_unclaimed(?,?)",
+          config.client,
+          resourceKey(operation, resource, body));
+    Savepoint sp = c.setSavepoint();
+    Reply r;
+    try {
+      r =
+          switch (operation) {
+            case "charge" -> create(c, "charge", body, fingerprint, language);
+            case "payout" -> create(c, "payout", body, fingerprint, language);
+            case "capture" -> capture(c, resource, body);
+            case "cancel" -> cancel(c, resource, body);
+            case "findTransaction" -> find(c, query);
+            case "initRefund" -> refund(c, body, fingerprint);
+            case "getBalance" -> balance(c, body);
+            default -> throw new ApiError(404, "not_found", "Unknown route");
+          };
+      if (!r.body().isEmpty()) contracts.response(template, r.status(), Json.parse(r.body()), "");
+    } catch (ApiError e) {
+      c.rollback(sp);
+      r = error(template, e);
+    }
+    r = localize(r, language);
+    if (idem != null && r.status() < 500)
+      Database.execute(
+          c,
+          "INSERT INTO"
+              + " operations(client_id,operation_name,idem_key,fingerprint,status,response_body,response_headers,tx_id)"
+              + " VALUES(?,?,?,?,?,?,?::jsonb,?)",
+          config.client,
+          operation,
+          idem,
+          fingerprint,
+          r.status(),
+          r.body(),
+          Json.string(r.headers()),
+          Json.text(body, "id"));
+    return r;
+  }
+
+  Reply localize(Reply r, String language) {
+    String selected =
+        r.headers().getOrDefault("Content-Language", ReferenceFeatures.locale(language));
+    var headers = new HashMap<>(r.headers());
+    headers.put("Content-Language", selected);
+    if (r.status() >= 400
+        && !r.body().isEmpty()
+        && r.headers().getOrDefault("Content-Type", "").contains("application/json")
+        && !r.headers().containsKey("Content-Language")) {
+      var body = (ObjectNode) Json.parse(r.body());
+      body.put("error_description", features.text(selected, "invalid_request"));
+      return new Reply(r.status(), Json.string(body), headers);
+    }
+    return new Reply(r.status(), r.body(), headers);
   }
 
   Reply error(String template, ApiError e) {
@@ -129,13 +186,15 @@ final class PaymentService {
       String detail = e.code;
       if (template.equals("/payout")) {
         if (status == 409) detail = "DUPLICATE_REQUEST_ERROR";
-        else if (!Set.of(
-                "VALIDATION_ERROR", "INVALID_PAYMENT_DETAILS_ERROR", "INSUFFICIENT_BALANCE")
-            .contains(detail)) detail = "VALIDATION_ERROR";
+        else if (status == 400
+            && !Set.of("VALIDATION_ERROR", "INVALID_PAYMENT_DETAILS_ERROR", "INSUFFICIENT_BALANCE")
+                .contains(detail)) detail = "VALIDATION_ERROR";
       } else if (status == 409) detail = "INVALID_CHARGE_STATE";
       else if (status == 404) detail = "RESOURCE_NOT_FOUND";
-      else if (status == 422) detail = "BANK_HARD_ERROR";
-      else if (!detail.equals("EXCEEDS_CAPTURE_LIMIT")) detail = "VALIDATION_ERROR";
+      else if (status == 422) {
+        if (!Set.of("BANK_HARD_ERROR", "BANK_SOFT_ERROR").contains(detail))
+          detail = "BANK_HARD_ERROR";
+      } else if (!detail.equals("EXCEEDS_CAPTURE_LIMIT")) detail = "VALIDATION_ERROR";
       if (contracts.op(template, "post").path("responses").path("" + status).has("content"))
         return Reply.json(status, Json.obj("detail", detail, "error_description", e.getMessage()));
     }
@@ -157,7 +216,12 @@ final class PaymentService {
     var a =
         Database.one(
             c,
-            "SELECT * FROM accounts WHERE client_id=? AND account_id=? AND currency=?",
+            "SELECT"
+                + " a.client_id,a.account_id,a.currency,reference_spendable(a.client_id,a.account_id,a.currency)"
+                + " AS available_e5,GREATEST(0,a.balance_e5-COALESCE(d.debt_e5,0))::bigint AS"
+                + " balance_e5 FROM accounts a LEFT JOIN account_debts d"
+                + " USING(client_id,account_id,currency) WHERE a.client_id=? AND a.account_id=? AND"
+                + " a.currency=?",
             config.client,
             id,
             currency);
@@ -168,14 +232,7 @@ final class PaymentService {
   private void adjust(Connection c, String id, String cur, long available, long balance)
       throws SQLException {
     Database.execute(
-        c,
-        "UPDATE accounts SET available_e5=available_e5+?,balance_e5=balance_e5+? WHERE client_id=?"
-            + " AND account_id=? AND currency=?",
-        available,
-        balance,
-        config.client,
-        id,
-        cur);
+        c, "SELECT reference_adjust(?,?,?,?,?)", config.client, id, cur, available, balance);
   }
 
   private void insert(
@@ -218,7 +275,8 @@ final class PaymentService {
         state);
   }
 
-  private Reply create(Connection c, String kind, JsonNode b, String hash) throws Exception {
+  private Reply create(Connection c, String kind, JsonNode b, String hash, String language)
+      throws Exception {
     String id = Json.text(b, "id");
     var old = transaction(c, kind, id);
     if (old != null) {
@@ -271,6 +329,8 @@ final class PaymentService {
       acc = b.path("payer").path("id").asText();
     }
     var a = account(c, acc, cur);
+    var profile =
+        features.method(Json.text(b, "funding_method"), Json.text(b, "country_iso2"), cur);
     String funding = Json.text(b, "funding_method"),
         method = kind.equals("charge") ? Json.text(b, "capture_method") : "AUTOMATIC";
     PspAdapter.Decision decision =
@@ -289,7 +349,12 @@ final class PaymentService {
     ObjectNode result = Json.obj("state", st, "psp_reference", ref(kind, id));
     String actionToken = WalletService.random(), csrf = WalletService.random();
     ObjectNode completion =
-        Json.obj("state", funding.equals("DEMO_PENDING_REJECT") ? "REJECTED" : "CONFIRMED");
+        Json.obj(
+            "state",
+            profile.path("behavior").asText().equals("pending_reject") ? "REJECTED" : "CONFIRMED");
+    completion.set("profile", profile);
+    completion.put("detail", profile.path("detail").asText("MERCHANT_REJECTED"));
+    completion.put("locale", ReferenceFeatures.locale(language));
     boolean action = kind.equals("charge") && decision.action();
     if (action) {
       completion.put("payment_token", actionToken);
@@ -297,7 +362,7 @@ final class PaymentService {
       completion.put("expires_at", System.currentTimeMillis() + config.actionTtlMs);
       completion.put("return_url", Json.text(b, "return_url"));
     }
-    if (action && funding.equals("DEMO_WEBVIEW"))
+    if (action && profile.path("behavior").asText().equals("webview"))
       result.set(
           "actions",
           Json.MAPPER
@@ -311,7 +376,7 @@ final class PaymentService {
                               0, config.publicBase.length() - config.base.length())
                           + "/demo/action?token="
                           + enc(actionToken))));
-    if (action && funding.equals("DEMO_QR"))
+    if (action && profile.path("behavior").asText().equals("qr"))
       result.set(
           "actions",
           Json.MAPPER
@@ -343,12 +408,13 @@ final class PaymentService {
         response);
     Database.execute(
         c,
-        "UPDATE transactions SET source_account_id=?,payee_account_id=? WHERE client_id=? AND"
-            + " kind=? AND id=?",
+        "UPDATE transactions SET source_account_id=?,payee_account_id=?,reference_profile=? WHERE"
+            + " client_id=? AND kind=? AND id=?",
         kind.equals("charge")
             ? b.path("source").path("id").asText()
             : b.path("payer").path("id").asText(),
         kind.equals("payout") ? b.path("payee").path("account").path("account_id").asText() : null,
+        Json.string(profile),
         config.client,
         kind,
         id);
@@ -557,8 +623,10 @@ final class PaymentService {
         response);
     Database.execute(
         c,
-        "UPDATE transactions SET source_account_id=? WHERE client_id=? AND kind='refund' AND id=?",
+        "UPDATE transactions SET source_account_id=?,reference_profile=? WHERE client_id=? AND"
+            + " kind='refund' AND id=?",
         original.get("source_account_id"),
+        original.get("reference_profile"),
         config.client,
         id);
     if (state.equals("PENDING"))
@@ -568,29 +636,48 @@ final class PaymentService {
           id,
           "COMPLETION",
           "",
-          Json.obj("state", "CONFIRMED"),
+          Json.obj(
+              "state",
+              features.method(funding, "", "").path("behavior").asText().equals("refund_reject")
+                  ? "REJECTED"
+                  : "CONFIRMED"),
           "PENDING",
           config.delay);
     return response;
   }
 
   private Reply balance(Connection c, JsonNode b) throws SQLException {
-    var a = account(c, Json.text(b, "account_id"), "BRL");
+    var p = features.method(Json.text(b, "funding_method"), Json.text(b, "country_iso2"), "");
+    String currency = p.path("currencies").get(0).asText();
+    var a = account(c, Json.text(b, "account_id"), currency);
     PspAdapter.BalanceResult result =
         adapter.getBalance(
             new PspAdapter.BalanceCommand(
                 Json.text(b, "funding_method"),
-                "BRL",
+                currency,
                 Database.number(a, "available_e5"),
                 Database.number(a, "balance_e5"),
                 b));
-    return Reply.json(
-        200,
+    ObjectNode out =
         Json.obj(
             "available_balance",
             amount(result.availableE5(), result.currency()),
             "balance",
-            amount(result.balanceE5(), result.currency())));
+            amount(result.balanceE5(), result.currency()));
+    if (p.path("itemized").asBoolean())
+      out.set(
+          "itemized_balances",
+          Json.MAPPER
+              .createArrayNode()
+              .add(
+                  Json.obj(
+                      "display_name",
+                      "Meal voucher",
+                      "available_balance",
+                      out.path("available_balance"),
+                      "balance",
+                      out.path("balance"))));
+    return Reply.json(200, out);
   }
 
   void queue(
@@ -603,13 +690,20 @@ final class PaymentService {
       String status,
       int delay)
       throws SQLException {
+    var event =
+        type.equals("CALLBACK")
+            ? Database.one(c, "SELECT reference_next_event(?,?,?) AS n", config.client, kind, id)
+            : null;
+    long sequence =
+        event == null || event.get("n") == null ? 0 : ((Number) event.get("n")).longValue();
     Database.execute(
         c,
         "INSERT INTO"
-            + " jobs(id,client_id,tx_kind,tx_id,job_type,callback_name,payload,status,next_attempt_at)"
-            + " VALUES(?,?,?,?,?,?,?,?,now()+(? * interval '1 millisecond')) ON CONFLICT DO"
+            + " jobs(id,client_id,tx_kind,tx_id,job_type,callback_name,payload,status,next_attempt_at,event_sequence)"
+            + " VALUES(?,?,?,?,?,?,?,?,now()+(? * interval '1 millisecond'),?) ON CONFLICT DO"
             + " NOTHING",
-        Json.hash(config.client + "/" + kind + "/" + id + "/" + type + "/" + callback),
+        Json.hash(
+            config.client + "/" + kind + "/" + id + "/" + type + "/" + callback + "/" + sequence),
         config.client,
         kind,
         id,
@@ -617,7 +711,8 @@ final class PaymentService {
         callback,
         Json.string(payload),
         status,
-        delay);
+        delay,
+        sequence);
   }
 
   void setState(Connection c, String kind, String id, String state, String detail)
@@ -639,13 +734,38 @@ final class PaymentService {
 
   void complete(Connection c, String kind, String id, String state, String detail)
       throws SQLException {
+    complete(c, kind, id, state, detail, null);
+  }
+
+  void complete(Connection c, String kind, String id, String state, String detail, JsonNode updated)
+      throws SQLException {
     if (!Set.of("charge", "refund", "payout").contains(kind)
         || !Set.of("CONFIRMED", "REJECTED").contains(state))
       throw new ApiError(400, "VALIDATION_ERROR", "Invalid completion");
     var t = transaction(c, kind, id);
     if (t == null || !Database.str(t, "state").equals("PENDING"))
       throw new ApiError(400, "VALIDATION_ERROR", "Transaction is not pending");
-    long n = Database.number(t, "amount_e5");
+    long n = Database.number(t, "amount_e5"), originalAmount = n;
+    var profile = Json.parse(Database.str(t, "reference_profile"));
+    if (kind.equals("charge")
+        && state.equals("CONFIRMED")
+        && profile.path("callback_mode").asText().equals("deposit")
+        && updated != null
+        && !updated.isMissingNode()) {
+      n = updated.asLong();
+      if (n <= 0 || n > originalAmount)
+        throw new ApiError(400, "VALIDATION_ERROR", "Invalid local deposit amount");
+      if (n != originalAmount) {
+        adjust(
+            c, Database.str(t, "account_id"), Database.str(t, "currency"), originalAmount - n, 0);
+        Database.execute(
+            c,
+            "UPDATE transactions SET amount_e5=? WHERE client_id=? AND kind='charge' AND id=?",
+            n,
+            config.client,
+            id);
+      }
+    }
     String acc = Database.str(t, "account_id"), cur = Database.str(t, "currency");
     if (kind.equals("refund")) {
       if (state.equals("CONFIRMED")) adjust(c, acc, cur, n, n);
@@ -654,6 +774,48 @@ final class PaymentService {
     if (kind.equals("payout") && state.equals("CONFIRMED"))
       adjust(c, Database.str(t, "payee_account_id"), cur, n, n);
     setState(c, kind, id, state, state.equals("REJECTED") ? detail : null);
+    if (kind.equals("charge") && profile.path("callback_mode").asText().equals("deposit")) {
+      if (state.equals("CONFIRMED")) {
+        if (n != originalAmount)
+          queue(
+              c,
+              kind,
+              id,
+              "CALLBACK",
+              "updateDeposit",
+              Json.obj(
+                  "merchant_reference", Database.str(t, "psp_reference"), "amount", amount(n, cur)),
+              "PENDING",
+              0);
+        queue(
+            c,
+            kind,
+            id,
+            "CALLBACK",
+            "confirmDeposit",
+            Json.obj("merchant_reference", Database.str(t, "psp_reference")),
+            "PENDING",
+            0);
+      } else
+        queue(
+            c,
+            kind,
+            id,
+            "CALLBACK",
+            "cancelDeposit",
+            Json.obj(
+                "merchant_reference", Database.str(t, "psp_reference"), "cancel_reason", detail),
+            "PENDING",
+            0);
+      Database.execute(
+          c,
+          "UPDATE jobs SET status='DONE',lease_until=NULL WHERE client_id=? AND tx_kind=? AND"
+              + " tx_id=? AND job_type='COMPLETION'",
+          config.client,
+          kind,
+          id);
+      return;
+    }
     String cb =
         kind.equals("charge")
             ? "chargeCallback"
@@ -672,6 +834,11 @@ final class PaymentService {
       payload.put("failed_reason", "Demo rejection");
     contracts.callback(cb, payload);
     queue(c, kind, id, "CALLBACK", cb, payload, "PENDING", 0);
+    if (!config.processorMode.equals("http")
+        && kind.equals("refund")
+        && state.equals("CONFIRMED")
+        && profile.path("behavior").asText().equals("refund_reversal"))
+      queue(c, kind, id, "REVERSAL", "", Json.obj(), "PENDING", config.delay);
     Database.execute(
         c,
         "UPDATE jobs SET status='DONE',lease_until=NULL WHERE client_id=? AND tx_kind=? AND tx_id=?"
@@ -681,7 +848,37 @@ final class PaymentService {
         id);
   }
 
+  void reverseRefund(Connection c, String id) throws SQLException {
+    var result =
+        Database.one(c, "SELECT reference_reverse_refund(?,?) AS changed", config.client, id);
+    if (Boolean.TRUE.equals(result.get("changed"))) {
+      var t = transaction(c, "refund", id);
+      queue(
+          c,
+          "refund",
+          id,
+          "CALLBACK",
+          "updateRefund",
+          Json.obj(
+              "status",
+              "REJECTED",
+              "merchant_reference",
+              Database.str(t, "psp_reference"),
+              "failed_reason",
+              "Synthetic processor reversed the refund; any unrecovered funds are recorded as"
+                  + " debt"),
+          "PENDING",
+          0);
+    }
+  }
+
   void expire(Connection c, Map<String, Object> t) throws SQLException {
+    if (Database.one(
+            c,
+            "SELECT 1 FROM resource_claims WHERE client_id=? AND resource_key=?",
+            config.client,
+            "charge:" + Database.str(t, "id"))
+        != null) return;
     if (!Database.str(t, "state").equals("AUTHORIZED") || t.get("expires_at") == null) return;
     if (Instant.parse(Database.str(t, "expires_at")).isAfter(Instant.now())) return;
     adjust(

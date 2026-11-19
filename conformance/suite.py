@@ -11,6 +11,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 from .review_suite import ReviewRegressionSuite
+from .completion_suite import CompletionSuite
 from . import contract
 from .wire import eventually
 
@@ -29,7 +30,7 @@ class HiddenForm(HTMLParser):
             self.fields[attrs["name"]] = attrs.get("value", "")
 
 
-class GatewaySuite(ReviewRegressionSuite, unittest.TestCase):
+class GatewaySuite(CompletionSuite, ReviewRegressionSuite, unittest.TestCase):
     client = mock = process = None
     client_id = "demo-client"
     client_secret = "demo-secret"
@@ -683,63 +684,12 @@ class GatewaySuite(ReviewRegressionSuite, unittest.TestCase):
         self.accepted("chargeCallback", data["id"])
 
     def test_shared_scenario_manifests(self):
-        scenarios = json.loads(
-            (contract.ROOT / "conformance/fixtures/scenarios.json").read_text()
-        )
+        from .scenario import Scenario, load
 
-        def field(value, path):
-            for part in path.split("."):
-                value = value[part]
-            return value
-
-        for scenario in scenarios:
-            with self.subTest(scenario=scenario["name"]):
-                bindings = {"id": self.uid()}
-
-                def expand(value):
-                    if isinstance(value, str):
-                        for key, item in bindings.items():
-                            value = value.replace("${" + key + "}", str(item))
-                        return value
-                    if isinstance(value, dict):
-                        return {k: expand(v) for k, v in value.items()}
-                    if isinstance(value, list):
-                        return list(map(expand, value))
-                    return value
-
-                for name, statuses in scenario.get("callback_faults", {}).items():
-                    self.mock.fail_next(name, bindings["id"], *statuses)
-                for step in scenario["steps"]:
-                    payload = (
-                        self.fixture(step["fixture"])
-                        if step.get("fixture")
-                        else expand(step.get("payload"))
-                    )
-                    if payload is not None:
-                        for key, value in expand(step.get("set", {})).items():
-                            payload[key] = value
-                    reply = self.client.request(
-                        step["method"],
-                        expand(step["path"]),
-                        payload,
-                        idem=self.uid() if step["method"] == "POST" else None,
-                    )
-                    schema_path = step.get("contract_path", step["path"].split("?")[0])
-                    body = self.assert_response(
-                        reply,
-                        schema_path,
-                        step["expect"]["status"],
-                        step["method"].lower(),
-                    )
-                    for key, value in expand(step["expect"].get("body", {})).items():
-                        self.assertEqual(field(body, key), value)
-                    for key, path in step.get("bind", {}).items():
-                        bindings[key] = field(body, path)
-                    if "callback" in step:
-                        expected = expand(step["callback"])
-                        event = self.accepted(expected["name"], expected["id"])[0]
-                        for key, value in expected.get("body", {}).items():
-                            self.assertEqual(field(event["payload"], key), value)
+        for file in ["scenarios.json", "recovery-scenarios.json"]:
+            for scenario in load(contract.ROOT / "conformance/fixtures" / file):
+                with self.subTest(scenario=scenario["name"]):
+                    Scenario(self).run(scenario)
 
     def test_test_controls_require_secret(self):
         response = self.client.request(

@@ -23,15 +23,17 @@ Use the root quickstart to generate development signing keys and start PostgreSQ
 - `PaymentService`: native PostgreSQL transaction orchestration, response replay, scoped ledger state and callback work creation.
 - `PspAdapter`: public typed ports for charge, capture, cancel, refund, payout, balance and operation lookup. `DemoPspAdapter` is an injected fake-money decision provider.
 - `WalletProvider`: public identity/consent and wallet-reference integration seam, injected into `WalletService`; `DemoWalletProvider` represents the explicit synthetic local account.
+- `ProcessorExecutor`: encrypted intents, resource/fund reservations, HTTP outside SQL, reconciliation and versioned events.
+- `ReferenceFeatures`: shared funding/reason/locale configuration.
 - `CallbackWorker`: durable pending completion and callback delivery, scoped token caching, exponential retry, and inspectable failure/reconciliation states.
 
 ## Integration boundary and safety
 
 The default `PspAdapter` and `WalletProvider` are Spring beans guarded by `@ConditionalOnMissingBean`, so another local implementation can be injected through application configuration. Both interfaces default to `isLocalOnly() == false`; the local executor refuses such adapters. This guard is not permission to label a network implementation as local.
 
-The fake-money adapter has no external side effect: its decisions and fake ledger writes execute under the same short per-client PostgreSQL transaction/advisory lock. Before supporting a real PSP, build and review a durable intent / external-call / reconciliation executor **outside** that database lock, provide real identity/consent, replace secret and storage integration, and resolve the documented contract errata. Changing `MODE` or installing a network adapter does not enable sandbox or production serving.
+The fake-money adapter has no external side effect: its decisions and fake ledger writes execute under the same short per-client PostgreSQL transaction/advisory lock. For a network boundary use the supplied native ProcessorExecutor **outside** that database lock; before supporting a real PSP, review/map its private processor transport, provide real identity/consent, replace secret and storage integration, and resolve the documented contract errata. Changing `MODE` or installing a network adapter does not enable sandbox or production serving.
 
-The reference app intentionally supports full manual capture only; unsupported partial capture fails with the approved local profile's schema-valid error. Refunds reserve against the original captured amount. Required idempotency requests replay persisted response bytes/headers and must authenticate before replay. A callback retry cannot run the fake ledger effect again. Permanent callback failures remain `FAILED`; HTTP 409 remains `RECONCILE` rather than being silently treated as successful.
+The reference app intentionally supports full manual capture only; unsupported partial capture fails with the provisional local profile's schema-valid error. Refunds reserve against the original captured amount. Required idempotency requests replay persisted response bytes/headers and must authenticate before replay. A callback retry cannot run the fake ledger effect again. Permanent callback failures remain `FAILED`; HTTP 409 remains `RECONCILE` rather than being silently treated as successful.
 
 ## Verification
 
@@ -44,4 +46,4 @@ Unit tests cover exact int64 values, schema composition, bounded malformed signa
 
 ## Review-hardened local policies
 
-`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. See the root `docs/review-follow-up.md` for unsupported flows and pending owner decisions.
+`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. The native `ProcessorExecutor` is the separate HTTP boundary: see `docs/processor-executor.md` for encrypted intents, reservations, out-of-transaction dispatch, fenced finalization and provider-key recovery. It is runnable against the independent local fixture; nonlocal modes remain forbidden. Shared feature profiles include reversal/debt, deposit amount ordering, all reason triggers, funding aliases and bilingual consent/errors. See `docs/review-follow-up.md` for owner decisions and real-integration gates.

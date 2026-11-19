@@ -30,7 +30,17 @@
     "OAUTH_REQUIRED": "false",
     "ACTION_TTL_MS": "600000",
     "REFRESH_TOKEN_TTL_SECONDS": "2592000",
-    "STRICT_ACCOUNT_NAME": "false"
+    "STRICT_ACCOUNT_NAME": "false",
+    "PROCESSOR_MODE": "local",
+    "PROCESSOR_URL": "http://127.0.0.1:9080",
+    "PROCESSOR_AUTH_TOKEN": "",
+    "PROCESSOR_STATE_KEY": "",
+    "PROCESSOR_TIMEOUT_MS": "2000",
+    "PROCESSOR_LEASE_MS": "15000",
+    "PROCESSOR_WAIT_MS": "250",
+    "PROCESSOR_POLL_MS": "200",
+    "PROCESSOR_MAX_FAILURES": "8",
+    "FUNDING_METHODS_FILE": ""
   },
   "startup": "Run from repository root; execute shared CREATE IF NOT EXISTS migration at startup. GET /health checks DB readiness. Reject any MODE other than local. Containers use HOST=0.0.0.0 explicitly.",
   "accounts": {
@@ -61,7 +71,7 @@
     "balance": "200 available_balance + balance; signature AND bearer get_balance always required",
     "errors": "Operation-specific declared errors; empty body where no content declared. Unexpected/transient failures return500 on ALL routes (provisional transient-5xx erratum), never400 and never persisted. Same key/changed payload returns400 except payout409 DUPLICATE_REQUEST_ERROR. Auth401 only where declared, otherwise400; token invalid signature ->400 invalid_request. Undeclared4xx are forbidden."
   },
-  "idempotency": "Required for charge,capture,cancel,initRefund,payout. operations PK(client_id,operation_name,idem_key), canonical sorted-key exact-integer request hash incl resource path. PG transaction advisory lock PER CLIENT serializes local fake ledger/idempotency, no remote calls under lock; lock_timeout1500ms and statement_timeout5000ms bound local waiting. Duplicate transaction create ID+samepayload returns saved original response even with new key; different payload400 (payout409). 2xx/nonretryable4xx replay; do not persist5xx; auth before replay. OAuth grants atomic single-use, not money idempotency.",
+  "idempotency": "Required for charge,capture,cancel,initRefund,payout. operations PK(client_id,operation_name,idem_key), canonical sorted-key exact-integer request hash incl resource path. Default local fake ledger/idempotency uses a per-client PG transaction advisory lock; HTTP mode uses short operation/resource/account reservations, no remote calls under locks; lock_timeout1500ms and statement_timeout5000ms bound local waiting. Duplicate transaction create ID+samepayload returns saved original response even with new key; different payload400 (payout409). 2xx/nonretryable4xx replay; do not persist5xx; auth before replay. OAuth grants atomic single-use, not money idempotency.",
   "signature": {
     "algorithm": "rsa-sha256",
     "padding": "PKCS1 v1.5",
@@ -72,7 +82,7 @@
     "verify": "strict bounded params; keyId configured; algorithm exact; signed headers exact; no duplicate params; Date within configured skew; constant-time digest; no request logging of sensitive headers; IMF-fixdate only; optional quoted created/expires impose additional freshness/expiry bounds and do not extend signed Date validity."
   },
   "oauth": {
-    "authorize": "GET renders local-only explicit consent HTML, no auto grant; validate client,response_type,redirect_uri,scope,state,authorization_details JSON array. Consent POST /demo/consent (outside BASE_PATH) uses CSRF token to issue code+redirect echo state; fake identity demo-account local only.",
+    "authorize": "GET renders local-only explicit consent HTML, no auto grant; validate client,response_type,redirect_uri,scope,state,authorization_details JSON array. Consent POST /demo/consent (outside BASE_PATH) uses CSRF token to issue code+redirect echo state; fake identity demo-account local only. Validate/display funding method, country, scopes and locale; persist consent context through grants. English/Portuguese demo only, not real login/SCA.",
     "token": "POST signed JSON validates CLIENT_ID/SECRET. authorization_code -> refresh_token,token_type lowercase bearer,authorization_details; refresh_token -> access_token,token_type bearer,expires_in STRING; wallet custom grant -> refresh_token,token_type bearer,authorization_details. Runtime response validated by grant-selected schema because upstream response oneOf branches overlap.",
     "tokens": "Hashed tokens only. Code10min single use bound to client/redirect/scopes/account; reused code revokes issued family. Access600sec. Reusable refresh tokens have configurable REFRESH_TOKEN_TTL_SECONDS default2592000; no rotation until U2 resolved. Scopes charge/refund/get_balance/offline_access; refresh never accepted as bearer.",
     "enforcement": "OAUTH_REQUIRED=true requires bearer for charge/capture/cancel/refund. AccessTokenAuthorization always requires bearer and matching account; webview signature-only allowed unless OAUTH_REQUIRED. Balance always scoped bearer."
@@ -109,20 +119,28 @@
       "idempotency_header": true
     }
   },
-  "jobs": "COMPLETION jobs finalize pending transaction+ledger+CALLBACK job in same PG transaction, stable IDs include client/kind/tx. Webview/QR initially WAITING until consent/test complete. Worker claims via lease or SKIP LOCKED and retries after restart. CALLBACK jobs attempt network outside DB lock, token cache by scope, renew expires_in with min(60s,10%) margin; 401 evicts token and schedules bounded retry with unchanged event key; retry429/5xx/timeouts with bounded backoff; 409->RECONCILE, other permanent4xx/exhaustion->FAILED; acknowledgment only2xx. Every delivery uses stable key where declared. No duplicate side effects on retry.",
+  "jobs": "COMPLETION jobs finalize pending transaction+ledger+CALLBACK job in same PG transaction, stable IDs include client/kind/tx. Webview/QR initially WAITING until consent/test complete. Worker claims via lease or SKIP LOCKED and retries after restart. CALLBACK jobs attempt network outside DB lock, token cache by scope, renew expires_in with min(60s,10%) margin; 401 evicts token and schedules bounded retry with unchanged event key; retry429/5xx/timeouts with bounded backoff; 409->RECONCILE, other permanent4xx/exhaustion->FAILED; acknowledgment only2xx. Every delivery uses stable key where declared. No duplicate side effects on retry. Callback identity includes monotonic transaction sequence; later versions wait until earlier callbacks are DONE. Unknown/permanent earlier delivery remains inspectable and blocks later events. HTTP mode uses PROVIDER_WAIT, never synthetic completion timers.",
   "test_control": {
     "guard": "Only ENABLE_TEST_CONTROL=true and nonempty random TEST_CONTROL_SECRET; X-Test-Control-Secret required; outside BASE_PATH under /_test; disabled default",
     "GET /_test/state": "JSON accounts/transactions/jobs synthetic data, no token hashes or secrets",
     "POST /_test/complete": "{id,kind:charge|refund|payout,state:CONFIRMED|REJECTED} completes pending/action through normal worker",
     "POST /_test/expire": "{id} expires authorized charge through normal release logic",
-    "POST /_test/callback": "{name,id,payload} queues one of six typed callbacks for contract tests"
+    "POST /_test/callback": "{name,id,payload} queues one of six typed callbacks for contract tests",
+    "POST /_test/reverse-refund": "{id} invokes idempotent synthetic refund inverse and ordered rejected update; disabled by default."
   },
-  "safety": "Outbound hosts allowed only localhost,127.0.0.1,::1,mock-uber in local mode; refuse userinfo and redirects. Nonlocal MODE fails startup. No production serving mode; real PSP/wallet adapters and security review required for sandbox. Never claim actual Uber qualification from local tests.",
+  "safety": "Outbound hosts allowed only localhost,127.0.0.1,::1,mock-uber,processor in local mode; refuse userinfo and redirects. Nonlocal MODE fails startup. No production serving mode; real PSP/wallet adapters and security review required for sandbox. Never claim actual Uber qualification from local tests.",
   "actions": "Generate a 256-bit unguessable capability when creating a WAITING charge; GET never mints authority from an Uber ID. POST requires capability+CSRF+unexpired WAITING job; single-use across races. ACTION_TTL_MS defaults10min and is the QR expiry. User deny ->USER_CANCELLED; expiry ->MERCHANT_EXPIRED; both release hold and queue rejection. Redirect only to exact ALLOWED_REDIRECT_URIS; no redirect for an unregistered return_url.",
   "limitations": [
-    "Synthetic local processor only; no external intent/dispatch/finalization/reconciliation executor or production serving mode.",
-    "Validated payment/KYC fields reach native adapter commands in memory; real KYC/routing/conversion policy, full locale consent presentation, and remaining feature limits are documented in docs/review-follow-up.md.",
-    "Deposit callbacks are typed client fixtures only until U11; settlement delivery bilateral.",
-    "CONFIRMED-to-REJECTED refund reversal is not implemented; pending owner-confirmed accounting design."
-  ]
+    "No real-money processor, resource-owner authentication, production serving mode, automatic production retention/erasure or settlement-file format/SFTP delivery.",
+    "U1-U15 remain unapproved external onboarding/contract decisions; local reference defaults and debt/deposit policies are not Uber approvals.",
+    "Balance uses the synthetic ledger; real KYC/routing/conversion, security and financial controls must be supplied by a PSP.",
+    "The shared suite includes versioned JSON workflows plus Python orchestration for deterministic processor and multiworker faults; not every test is a JSON scenario."
+  ],
+  "processor_executor": "Optional native local HTTP executor: encrypted durable command+configuration hash, stable provider key, resource/debit/credit reservations, prepare -> HTTP outside SQL -> fenced finalization. Poll or authenticated versioned /adapter/events; uncertain outcome retains reservations and returns retryable500, never a cached5xx. Independent fixture and protocol are reference-only; real modes remain disabled.",
+  "funding_profiles": "reference-features.json owns synthetic profiles/reasons and en-US/pt-BR copy. FUNDING_METHODS_FILE maps an assigned alias to a demo profile with explicit countries/currencies. Configuration cannot change while intents are outstanding. This is not Uber registration.",
+  "refund_reversal": "CONFIRMED -> REJECTED: unique inverse record, recover only unreserved funds, record unrecovered debt, preserve unrelated holds; future credits/releases repay debt before spendability. Ordered event sequences prevent callback overtaking. Synthetic reference accounting policy, not Uber approval.",
+  "enum_applicability": {
+    "OAuth2Error.unauthorized_client": "Not emitted by the single registered local client, which is enabled for all three declared grants. A multi-client PSP must add grant authorization policy.",
+    "OAuth2Error.unsupported_token_type": "Revocation-only code; there is no token-revocation operation in this pinned API surface."
+  }
 }

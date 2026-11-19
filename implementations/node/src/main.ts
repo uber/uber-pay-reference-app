@@ -12,14 +12,23 @@ async function main(): Promise<void> {
   const server = app.listen(config.port, config.host, () => {
     console.log(`Local synthetic-money Node gateway listening on ${config.host}:${config.port}`);
     worker.start();
+    service.executor?.start();
   });
   async function stop(): Promise<void> {
     server.close();
     await worker.stop();
+    await service.executor?.stop();
     await store.close();
     process.exit(0);
   }
-  process.once('SIGINT', () => { void stop(); });
-  process.once('SIGTERM', () => { void stop(); });
+  process.once('SIGINT', () => {
+    void stop();
+  });
+  process.once('SIGTERM', () => {
+    void stop();
+  });
 }
-main().catch(() => { console.error('Gateway startup failed; check configuration, contract, keys and database'); process.exit(1); });
+main().catch(() => {
+  console.error('Gateway startup failed; check configuration, contract, keys and database');
+  process.exit(1);
+});

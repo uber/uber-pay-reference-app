@@ -92,6 +92,8 @@ func number(x any) (int64, error) {
 	switch n := x.(type) {
 	case json.Number:
 		return strconv.ParseInt(n.String(), 10, 64)
+	case int32:
+		return int64(n), nil
 	case int64:
 		return n, nil
 	case int:

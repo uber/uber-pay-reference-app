@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"errors"
-	"strings"
 )
 
 // PspAdapter is the native processor seam. The gateway owns Uber wire formats,
@@ -28,41 +27,80 @@ type CaptureCommand struct {
 	ID, ProviderKey, Currency, AuthorizedCurrency, FundingMethod string
 	AmountE5, AuthorizedE5                                       int64
 }
-type ProviderResult struct{ State, Detail string }
+type ProviderResult struct{ State, Detail, FinalState, FinalDetail string }
 type DemoPspAdapter struct{}
 
-func (DemoPspAdapter) Charge(_ context.Context, c PaymentCommand) (ProviderResult, error) {
+func demoDecision(c PaymentCommand, payout bool) (ProviderResult, error) {
 	if e := validatePaymentData(c.Request, c.AmountE5); e != nil {
 		return ProviderResult{}, e
 	}
-	if !knownFunding(c.FundingMethod) {
-		return ProviderResult{}, errors.New("unsupported demo funding method")
+	f, e := LoadFeatures()
+	if e != nil {
+		return ProviderResult{}, e
 	}
-	if c.CaptureMethod == "MANUAL" && c.FundingMethod != "DEMO_SYNC" && c.FundingMethod != "DEMO_REJECT" && !strings.HasPrefix(c.FundingMethod, "DEMO_CAPTURE_") {
+	p, e := f.Method(c.FundingMethod, str(c.Request, "country_iso2"), c.Currency)
+	if e != nil {
+		return ProviderResult{}, e
+	}
+	behavior, detail := str(p, "behavior"), str(p, "detail")
+	if detail != "" {
+		key := "charge_reasons"
+		if payout {
+			key = "payout_reasons"
+		}
+		valid := false
+		for _, x := range f.Data[key].([]any) {
+			if x == detail {
+				valid = true
+			}
+		}
+		if !valid {
+			return ProviderResult{}, errors.New("reason not valid for operation")
+		}
+	}
+	if c.CaptureMethod == "MANUAL" && (behavior == "pending" || behavior == "pending_reject" || behavior == "webview" || behavior == "qr") {
 		return ProviderResult{}, errors.New("manual authorization must be synchronous")
 	}
-	if c.FundingMethod == "DEMO_REJECT" || c.AvailableE5 < c.AmountE5 {
-		return ProviderResult{"REJECTED", "INSUFFICIENT_BALANCE"}, nil
+	if c.AvailableE5 < c.AmountE5 {
+		return ProviderResult{State: "REJECTED", Detail: "INSUFFICIENT_BALANCE"}, nil
 	}
-	if c.FundingMethod != "DEMO_SYNC" && !strings.HasPrefix(c.FundingMethod, "DEMO_CAPTURE_") {
-		return ProviderResult{State: "PENDING"}, nil
+	if behavior == "reject" {
+		return ProviderResult{State: "REJECTED", Detail: detail}, nil
+	}
+	if behavior == "pending" || behavior == "pending_reject" || behavior == "webview" || behavior == "qr" {
+		final := "CONFIRMED"
+		if behavior == "pending_reject" {
+			final = "REJECTED"
+		}
+		return ProviderResult{State: "PENDING", FinalState: final, FinalDetail: detail}, nil
 	}
 	if c.CaptureMethod == "MANUAL" {
 		return ProviderResult{State: "AUTHORIZED"}, nil
 	}
 	return ProviderResult{State: "CONFIRMED"}, nil
 }
-func (d DemoPspAdapter) Payout(ctx context.Context, c PaymentCommand) (ProviderResult, error) {
+func (DemoPspAdapter) Charge(_ context.Context, c PaymentCommand) (ProviderResult, error) {
+	return demoDecision(c, false)
+}
+func (DemoPspAdapter) Payout(_ context.Context, c PaymentCommand) (ProviderResult, error) {
 	c.CaptureMethod = "AUTOMATIC"
-	return d.Charge(ctx, c)
+	return demoDecision(c, true)
 }
 func (DemoPspAdapter) Capture(_ context.Context, c CaptureCommand) (ProviderResult, error) {
 	if c.Currency != c.AuthorizedCurrency || c.AmountE5 != c.AuthorizedE5 {
 		return ProviderResult{}, errors.New("only exact full capture is available in this reference profile")
 	}
-	if strings.HasPrefix(c.FundingMethod, "DEMO_CAPTURE_") {
+	f, e := LoadFeatures()
+	if e != nil {
+		return ProviderResult{}, e
+	}
+	p, e := f.Method(c.FundingMethod, "", "")
+	if e != nil {
+		return ProviderResult{}, e
+	}
+	if str(p, "behavior") == "capture_hard" || str(p, "behavior") == "capture_soft" {
 		detail := "BANK_HARD_ERROR"
-		if c.FundingMethod == "DEMO_CAPTURE_SOFT" {
+		if str(p, "behavior") == "capture_soft" {
 			detail = "BANK_SOFT_ERROR"
 		}
 		return ProviderResult{State: "REJECTED", Detail: detail}, nil
@@ -71,8 +109,24 @@ func (DemoPspAdapter) Capture(_ context.Context, c CaptureCommand) (ProviderResu
 }
 func (DemoPspAdapter) Cancel(context.Context, string) error { return nil }
 func (DemoPspAdapter) Refund(_ context.Context, c PaymentCommand) (ProviderResult, error) {
-	if strings.HasPrefix(c.FundingMethod, "DEMO_PENDING") {
-		return ProviderResult{State: "PENDING"}, nil
+	f, e := LoadFeatures()
+	if e != nil {
+		return ProviderResult{}, e
+	}
+	p, e := f.Method(c.FundingMethod, "", "")
+	if e != nil {
+		return ProviderResult{}, e
+	}
+	behavior := str(p, "behavior")
+	if behavior == "refund_sync_reject" {
+		return ProviderResult{State: "REJECTED"}, nil
+	}
+	if behavior == "pending" || behavior == "pending_reject" || behavior == "refund_reversal" || behavior == "refund_reject" {
+		final := "CONFIRMED"
+		if behavior == "refund_reject" {
+			final = "REJECTED"
+		}
+		return ProviderResult{State: "PENDING", FinalState: final, FinalDetail: "MERCHANT_REJECTED"}, nil
 	}
 	return ProviderResult{State: "CONFIRMED"}, nil
 }

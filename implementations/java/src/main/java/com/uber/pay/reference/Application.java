@@ -70,6 +70,11 @@ public class Application {
   }
 
   @Bean(initMethod = "start", destroyMethod = "close")
+  ProcessorExecutor processor(PaymentService p) {
+    return new ProcessorExecutor(p);
+  }
+
+  @Bean(initMethod = "start", destroyMethod = "close")
   CallbackWorker worker(Config c, Database d, PaymentService p, Contracts ct) {
     return new CallbackWorker(c, d, p, ct);
   }

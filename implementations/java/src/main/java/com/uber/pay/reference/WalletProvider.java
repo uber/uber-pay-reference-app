@@ -27,7 +27,7 @@ final class DemoWalletProvider implements WalletProvider {
 
   public Identity exchangeWalletReference(
       String identifier, String requested, String funding, String country) {
-    DemoPspAdapter.method(funding);
+    new ReferenceFeatures().method(funding, country, "");
     if (!identifier.equals("demo-account") || !requested.isEmpty() && !requested.equals(identifier))
       throw new ApiError(400, "invalid_grant", "Unknown demo wallet");
     return describeAccount(identifier);

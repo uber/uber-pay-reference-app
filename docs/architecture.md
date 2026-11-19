@@ -12,11 +12,28 @@ The local fake processor and gateway data commit in **one PostgreSQL transaction
 
 Pending completion and its eventual callback are durable rows in `jobs`. A worker commits the final state and callback job atomically. Callback network calls take place outside ledger transactions. Leased jobs resume after restart; retries use a stable delivery key only when that callback declares one. Callback 401 refreshes the scope token and retries with the same identity and bounded budget. Any other permanent error or exhausted retry is inspectable `FAILED`; a callback409 becomes `RECONCILE`, never an assumption that the payment itself failed. Callback delivery state is distinct from PSP transaction state.
 
-## External PSP boundary is deliberately closed
+## Durable HTTP processor boundary
 
-A local atomic fake effect is **not** exactly-once external processing. Do not make a network request from the demo adapter while holding its SQL transaction. Before adding an external adapter, introduce durable operation intents and stable provider keys, dispatch outside database locks, then reconcile uncertain outcomes by provider lookup or safe provider-key replay before committing the response. Tests must cover a process crash after the processor succeeded but before the gateway recorded the result. Without that executor/reconciliation boundary, non-local modes must remain rejected.
+`PROCESSOR_MODE=http` selects a native prepare/dispatch/finalize executor, not an
+injected network call under the demo adapter's lock. It commits an encrypted
+`provider_intents` command, stable provider key, `resource_claims` and
+`intent_reservations`; releases the SQL connection; then calls the private local
+processor transport. A second short transaction checks a fencing generation,
+validates the immutable processor reference and commits the native result.
+Retries look up the original provider key before replaying an absent operation.
+Uncertain effects retain reservations; exhausted recovery becomes inspectable
+RECONCILE. Pending credit headroom survives until final confirmation.
 
-Similarly, local consent is a synthetic identity exercise, not an authentication product. Real resource-owner login, consent, client registration, token revocation/rotation policies and redirect handling need the PSP's provider and security review. No environment setting turns demo identities into real identities.
+This boundary is runnable in all three languages against an independent durable
+SQLite-backed processor. Its common tests kill the gateway before dispatch and
+after processor commit, drop responses, prove concurrent independent HTTP calls,
+and verify bounded duplicate waits and stale-event fencing. It is still a local,
+synthetic reference protocol, not a real PSP implementation or production mode.
+See [executor protocol and operation](processor-executor.md).
+
+Local consent remains a synthetic identity exercise. Real resource-owner login,
+client registration and operational/security policies are PSP supplied. No
+environment setting turns demo identities into real identities.
 
 ## Authentication direction
 
@@ -28,15 +45,23 @@ Inbound Uber signatures cover raw request bytes, original path/query, Host, Date
 - E5 int64 is preserved across decoding, persistence, response and callback serialization; overflow is rejected.
 - Full capture only until partial-capture semantics are approved.
 - Some declared errors/state vocabularies contradict upstream prose/examples. The local error choices are not formal Uber compatibility approval.
-- The three deposit callback builders are tested explicitly; funding-method-specific automatic use needs an Uber decision.
+- `DEMO_DEPOSIT` exercises confirm/cancel and reduced-amount update callbacks end to end. Ordinary charges still use chargeCallback; real funding-method routing remains U11.
 - No settlement schema/SFTP exporter is fabricated. Production retention, erasure, fraud and financial controls belong to each actual deployment.
 
 ## Review-hardened local profile
 
-Transient DB/infrastructure errors are 500 even on routes lacking a declared 5xx; this is an explicitly provisional erratum, never a fake400 or stored retry result. Every pool uses a 1500ms lock timeout and 5000ms statement timeout. Java uses HikariCP. The per-client local lock is intentional and makes no independent-charge throughput promise.
+Transient DB/infrastructure errors are 500 even on routes lacking a declared 5xx; this is an explicitly provisional erratum, never a fake400 or stored retry result. Every pool uses a 1500ms lock timeout and 5000ms statement timeout. Java uses HikariCP. The default in-process demo uses that local lock. HTTP processing uses operation/resource/account locks only for short prepare/finalize transactions, never across HTTP; no production throughput SLO is claimed.
 
-Payouts reserve/debit the payer settlement account and credit the payee only on confirmation. Reconciliation metadata includes source_account_id, payee_account_id and order_id; raw customer/KYC/merchant-secret input is passed to the local adapter in memory, not persisted.
+Payouts reserve/debit the payer settlement account and credit the payee only on confirmation. Reconciliation metadata includes source_account_id, payee_account_id and order_id; raw customer/KYC/merchant-secret input is passed in memory in demo mode. The HTTP executor encrypts its recoverable command with AES-256-GCM; logs, normal transaction rows and the independent processor fixture do not store the raw command.
 
 WAITING actions have creation-time random capabilities, CSRF, configurable lifetime and single-use completion. User denial and expiry release holds and emit distinct USER_CANCELLED / MERCHANT_EXPIRED reasons. OAuth codes are single-use and reuse revokes their family; refresh tokens deliberately do not rotate pending U2. Return URLs must exactly match the configured allowlist to receive a redirect.
 
-See [review disposition](review-follow-up.md) for the full distinction between implemented regressions, optional omissions, unimplemented business flows and owner decisions.
+Versioned callback sequences preserve per-transaction delivery order. A confirmed
+refund can be reversed once: recover unreserved funds, record remaining debt,
+protect unrelated holds, and repay debt from future credits/releases. This is a
+provisional synthetic accounting policy, not Uber-approved collections behavior.
+English/Portuguese pages and error descriptions, consent funding/country/locale
+context, configurable funding aliases and optional itemized balances are shared
+reference features in `contracts/reference-features.json`.
+
+See [review disposition](review-follow-up.md) for the full distinction between implemented regressions, implemented local policies and remaining real-integration/owner gates.
