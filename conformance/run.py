@@ -267,7 +267,7 @@ def main():
             ENABLE_TEST_CONTROL="true",
             TEST_CONTROL_SECRET=secret,
             ASYNC_DELAY_MS="500",
-            ACTION_TTL_MS="2500",
+            ACTION_TTL_MS="600000",
             WORKER_INTERVAL_MS="100",
             CALLBACK_RETRY_MS="100",
             CALLBACK_MAX_ATTEMPTS="5",

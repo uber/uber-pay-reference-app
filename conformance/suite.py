@@ -676,19 +676,10 @@ class GatewaySuite(ReviewRegressionSuite, unittest.TestCase):
 
     def test_restart_pending_jobs(self):
         if not self.process:
-            self.fail(
-                "Restart test requires process-managed gateway (not an external server)"
-            )
-        data, _ = self.charge(funding_method="DEMO_WEBVIEW")
+            self.fail("Restart test requires a process-managed gateway")
+        data, response = self.charge(funding_method="DEMO_WEBVIEW")
         self.process.restart(hard=True)
-        self.assertEqual(
-            self.client.control(
-                "POST",
-                "complete",
-                {"id": data["id"], "kind": "charge", "state": "CONFIRMED"},
-            ).status,
-            200,
-        )
+        self.assertEqual(self.submit_action(self.action_page(response)).status, 302)
         self.accepted("chargeCallback", data["id"])
 
     def test_shared_scenario_manifests(self):

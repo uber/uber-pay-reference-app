@@ -112,14 +112,26 @@ class ReviewRegressionSuite:
         self.assertEqual(self.lookup(plain["id"])["status"], "CONFIRMED")
 
     def test_review_action_expiry_releases_hold_and_notifies(self):
-        data, response = self.charge(funding_method="DEMO_QR")
-        form = self.action_page(response)
-        event = self.accepted("chargeCallback", data["id"])[0]
-        self.assertEqual(
-            event["payload"]["state"],
-            {"value": "REJECTED", "detail": "MERCHANT_EXPIRED"},
-        )
-        self.assertEqual(self.submit_action(form).status, 400)
+        # Test expiry with a short lifetime only here. A global short TTL makes
+        # unrelated browser/restart tests depend on JVM boot time and runner load.
+        previous = self.process.environment.get("ACTION_TTL_MS")
+        try:
+            self.process.environment["ACTION_TTL_MS"] = "2500"
+            self.process.restart(hard=True)
+            data, response = self.charge(funding_method="DEMO_QR")
+            form = self.action_page(response)
+            event = self.accepted("chargeCallback", data["id"])[0]
+            self.assertEqual(
+                event["payload"]["state"],
+                {"value": "REJECTED", "detail": "MERCHANT_EXPIRED"},
+            )
+            self.assertEqual(self.submit_action(form).status, 400)
+        finally:
+            if previous is None:
+                self.process.environment.pop("ACTION_TTL_MS", None)
+            else:
+                self.process.environment["ACTION_TTL_MS"] = previous
+            self.process.restart(hard=True)
 
     def test_review_unregistered_return_url_never_redirected(self):
         data, response = self.charge(
