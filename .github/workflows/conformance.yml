@@ -1,0 +1,74 @@
+name: Native PSP contract parity
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [node, java, go]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: uberpay
+          POSTGRES_PASSWORD: uberpay
+          POSTGRES_DB: uberpay
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U uberpay -d uberpay"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node'
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: "1.25"
+          cache-dependency-path: implementations/go/go.sum
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: make setup contract lint migration-check test-python
+      - if: matrix.language == 'node'
+        run: npm --prefix implementations/node ci --registry=https://registry.npmjs.org && make test-node
+      - if: matrix.language == 'go'
+        run: make test-go
+      - if: matrix.language == 'java'
+        run: make test-java
+      - run: make conformance LANGUAGE=${{ matrix.language }}
+      - name: Container clone-and-run smoke
+        env:
+          POSTGRES_PORT: "55434"
+        run: |
+          make up LANGUAGE=${{ matrix.language }}
+          python - <<'PYCODE'
+          import time, urllib.request
+          for attempt in range(90):
+              try:
+                  assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=2).status == 200
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Container gateway failed readiness')
+          PYCODE
+          make demo LANGUAGE=${{ matrix.language }}
+      - name: Stop smoke containers
+        if: always()
+        run: make down
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-${{ matrix.language }}
+          path: .artifacts/conformance

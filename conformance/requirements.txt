@@ -1,0 +1,5 @@
+cryptography==50.0.2
+jsonschema==4.26.0
+psycopg[binary]==3.3.9
+
+PyYAML==6.0.3

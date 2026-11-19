@@ -1,0 +1,91 @@
+x-gateway-environment: &gateway-environment
+  MODE: local
+  HOST: 0.0.0.0
+  PORT: "8080"
+  BASE_PATH: /uberpay/v1
+  DATABASE_URL: postgresql://uberpay:uberpay@db:5432/uberpay
+  UBER_PUBLIC_KEY_FILE: /keys/uber-public.pem
+  UBER_KEY_ID: demo-uber-key
+  CLIENT_ID: demo-client
+  CLIENT_SECRET: demo-secret
+  UBER_CLIENT_ID: demo-uber-client
+  UBER_CLIENT_SECRET: demo-uber-secret
+  UBER_CALLBACK_BASE_URL: http://mock-uber:9090
+  UBER_TOKEN_URL: http://mock-uber:9090/oauth/token
+  PUBLIC_BASE_URL: http://127.0.0.1:8080/uberpay/v1
+  ALLOWED_REDIRECT_URIS: http://127.0.0.1:9090/return,uber://ubercash_topup
+  ENABLE_TEST_CONTROL: "false"
+  OAUTH_REQUIRED: "false"
+x-gateway-depends: &gateway-depends
+  db:
+    condition: service_healthy
+  keygen:
+    condition: service_completed_successfully
+  mock-uber:
+    condition: service_healthy
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: uberpay
+      POSTGRES_PASSWORD: uberpay
+      POSTGRES_DB: uberpay
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - reference-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uberpay -d uberpay"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  keygen:
+    build:
+      context: .
+      dockerfile: conformance/Dockerfile
+    command: ["python", "-m", "conformance.dev_keys", "--directory", "/keys"]
+    volumes:
+      - dev-keys:/keys
+  mock-uber:
+    build:
+      context: .
+      dockerfile: conformance/Dockerfile
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - dev-keys:/keys:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/health',timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  node:
+    profiles: ["node"]
+    build:
+      context: .
+      dockerfile: implementations/node/Dockerfile
+    environment: *gateway-environment
+    depends_on: *gateway-depends
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["dev-keys:/keys:ro"]
+  java:
+    profiles: ["java"]
+    build:
+      context: .
+      dockerfile: implementations/java/Dockerfile
+    environment: *gateway-environment
+    depends_on: *gateway-depends
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["dev-keys:/keys:ro"]
+  go:
+    profiles: ["go"]
+    build:
+      context: .
+      dockerfile: implementations/go/Dockerfile
+    environment: *gateway-environment
+    depends_on: *gateway-depends
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["dev-keys:/keys:ro"]
+volumes:
+  reference-data:
+  dev-keys:

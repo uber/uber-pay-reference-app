@@ -1,0 +1,3022 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "version": "1.4",
+    "title": "Uber Pay API",
+    "description": "Uber Pay is currently **invite only** for payment service providers and payment partners.\n\n[Get in touch](mailto:getuberpay@uber.com) to register your interest in using our APIs and we’ll reach out as soon as possible.\n\n# Introduction to Uber Pay\n\nUber is an ever-growing ecosystem of products and services for people around the world.\nWe want to empower people to pay and get paid with their preferred payment method.\n\nIf you are a Payment Service Provider (PSP) or payment partner, you can now integrate with\nUber by leveraging **Uber Pay** APIs.\n\n### Use Cases\n\nBy building a single API integration with Uber Pay, you will be able to:\n\n* Enable millions of consumers to pay for their ride with Uber or their order on Uber Eats.\n* Enable your customers to load money into the Uber ecosystem right from your app or website, thereby increasing customer engagement.\n* Enable Uber delivery partners (drivers, couriers, etc) to settle their outstanding arrears using their preferred payment method.\n* Provide Uber delivery partners the flexibility to receive payments through their preferred digital wallets.\n* Convert loyalty programs points (such as credits or airline miles) into Uber Cash, our stored credits which consumers can spend on rides and Eats orders.\n* Feature your payment instruments as an official payment method on Uber.\n\n### How it works\n\nUber Pay is both:\n\n* A specification: a set of endpoints for PSPs to build and expose for the integration to work correctly\n* An API: a set of functionalities exposed by Uber for partners to leverage\n\nWhen you integrate with Uber Pay, you will need to implement a few endpoints on your end for Uber apps\nto call and initiate the correct flow (e.g. payment method onboarding, money movement, refund, etc).\n\n**Uber Pay** defines two sets of APIs for PSP Partners to implement:\n\n#### 1. Partner Payment API\n\nAllows Uber to initiate payment transactions, check transaction statuses, initiate refunds and query payment method balance.\n\n| API              | Description                                                        |\n|------------------|--------------------------------------------------------------------|\n| Charge           | Initiate money movement                                            |\n| Capture          | Capture payment on an authorized charge                            |\n| Cancel           | Cancel an authorized charge                                        |\n| Find Transaction | Retrieve the current status of a transaction from Partner's system |\n| Init Refund      | Initiate customer refund                                           |\n| Get Balance      | Get payment instrument's available balance                         |\n\n#### 2. Partner Payout API\n\nAllows Uber to create payouts.\n\n| API              | Description     |\n|------------------|-----------------|\n| Payout           | Create a payout |\n\n#### 3. Payment Method Onboarding (Partner OAuth2 API)\n\nPayment method onboarding (via oAuth 2.0 protocol) is available and recommended for improving\nboth the user experience and conversion rate at checkout.\n\nWhen *Partner OAuth2 API* integration is not an option, **Uber Pay** offers the possibility to\nuse a *2FA experience* leveraging a webview provided by PSP Partner to authorize the payment\nevery time during checkout.\n\n| API          | Description                                                     |\n|--------------|-----------------------------------------------------------------|\n| Authorize    | Authorization web page for users to grant Uber access           |\n| Create Token | OAuth 2 endpoint allowing creation of access and refresh tokens |\n\n## FAQs\n\n**We already have an API, can’t Uber integrate with it directly?**\n\nUber does integrate directly with Partner’s API, though our engineering teams can only\nwork on so many integrations every year. One of the reasons Uber Pay was born is to allow\nfor Partners to join the Uber ecosystem quickly and more independently.\n\n**How flexible is the Uber Pay API?**\n\nThe Uber Pay integration model standardizes the flow of data between Uber and PSPs.\nWorking with many partners, we have designed our APIs to allow for some flexibility.\nAs a rule of thumb, though, Uber will not be able to adjust said data flows and structures\nto fit a PSP’s existing infrastructure and/or APIs.\n\n**How often will I need to update my integration?**\n\nAs the Uber Pay APIs evolve, new capabilities will be added that may require changes on\nthe PSP’s end. We will always prioritize supporting backward compatibility. If a breaking\nchange will be needed, we will give ample notice, and do our best to minimize the impact\nof the work on your end to implement the required changes.\n\n**How long does it take to launch a new payment method via Uber Pay?**\n\nThe bulk of the work will revolve around the PSP building the necessary endpoints following\nthe Uber Pay specification. Once those are in place, and we have validated the integration works,\nlaunching a payment method is usually a matter of adding some configurations, testing the flow,\nand following a gradual rollout plan. Once the first payment method goes live, any subsequent\nones will take significantly less.\n\n# Onboarding\n\nIn order to start using the APIs you need to complete the following phases:\n\n- [Sign up](https://developer.uber.com/docs/payments/guides/integration/onboard#sign-up-on-the-developer-portal) on the developer portal\n- [Configure](https://developer.uber.com/docs/payments/guides/integration/onboard#configure-your-account) your account\n\n## Sign up on the developer portal\n\n1. Visit [Uber’s developer portal](https://developer.uber.com/)\n2. Click \"Sign In\"\n3. Create an Uber account that you will use for developer access.\n    - You will need a mobile phone number and a password to create an account.\n    - We recommend partners not to use personal account or information.\n4. Once you are in the developer portal dashboard, create an app by clicking \"+ new app\".\n5. Note down the **client ID** of the app. It’s an identifier (not secret or password) to recognize your app. You will use this ID to configure your account.\n\n## Account configuration\n\nAfter you sign up, Uber Pay will configure your newly created app. For us to do so, you’ll need to provide the following:\n\n1. **Client ID** - From the app that you generated in the previous step.\n2. **Base URL** - Base URL of your Uber Pay implementation. Uber Pay will build absolute URLs by concatenating this base URL you provide with relative paths of the endpoints defined in this spec. For instance `/charge` endpoint will be called `${BASE_URL}/charge`.\n\n## Payment method configuration\n\nIn addition to your account, Uber Pay will configure and share the following attributes:\n\n1. **Funding method code** - We assign a code for each payment method you support.\n2. **Source account ID** - This ID is an internal Uber reference to the Partner's settlement account. Typically there will be multiple of these IDs depending on the number of countries in which you operate. You are expected to generate one reconciliation report per source account ID.\n\n# Authentication\n\n## Signature validation\n\nAll requests from Uberpay shall have a signature header which is a RSA signature of request-target, Date and Digest headers as per\n[Draft Cavage HTTP Signatures. Section 4.1.1](https://tools.ietf.org/html/draft-cavage-http-signatures-11#section-4.1.1). Example below shows how a charge request from Uber looks like:\n\n```\ncurl -X POST \\\nhttps://uber.partner.com/v1/payments/charge \\\n-H 'Accept-Language: pt-BR' \\\n-H 'Date: Sat, 08 Jun 2019 20:51:35 GMT' \\\n-H 'Digest: SHA-256=XLnQeHxHWlOkXmqcQaS57rSVfDBUTSUFRpvqZfLxBU0=' \\\n-H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\",\nheaders=\"(request-target) host date digest\",\nsignature=\"dMpg9QKPxwP5l8O6Q7OFC2vNPoJucKga1WKbvPfMY52pi20Hti/mk017OicAuYRfpH9rBsq/6g2wK0m1qqgVNY0UUvIGIrMJd9ii55YacTL/4HAv5CLPFcSDWqFUsA0W8HvvlEk6YgVD052obT6KS0Zd3qJfRJ+qS7KHkSLKAw8=\"'\n-H 'X-Idempotency-Key: c900d4dd-7070-4e0b-9323-8f24cfde0490' \\\n-H 'Content-Type: application/json' \\\n-d \"{\\\"destination\\\": {\\\"owner_id\\\": \\\"dest_owner_id\\\",\\\"id\\\": \\\"dest_id\\\",\\\"type\\\": \\\"Account\\\"},\\\"source\\\": {\\\"owner_id\\\": \\\"source_owner_id\\\",\\\"id\\\": \\\"source_id\\\",\\\"type\\\": \\\"Account\\\"},\\\"amount\\\": {\\\"value\\\": 100000,\\\"currency\\\": \\\"BRL\\\"},\\\"description\\\": \\\"I'm a deposit in sandbox.\\\",\\\"country_iso2\\\": \\\"BR\\\",\\\"funding_method\\\": \\\"BOLETO\\\",\\\"initiated_at\\\": \\\"2019-06-08T20:51:35Z\\\",\\\"session_id\\\": \\\"8b31b7f4-3542-4391-817c-d496ce84a7ae\\\",\\\"return_url\\\": \\\"uber:\\/\\/payments\\/deposit?correlation_id=c900d4dd-7070-4e0b-9323-8f24cfde0490\\\",\\\"destination_owner\\\": {\\\"type\\\": \\\"Customer\\\",\\\"id\\\": \\\"a66b36d5-887c-4e7c-9edb-9fcbef108e83\\\",\\\"uri\\\": \\\"\\/\\/payments\\/customers\\/a66b36d5-887c-4e7c-9edb-9fcbef108e83\\\",\\\"details\\\": {\\\"mobile\\\": \\\"+123456788\\\",\\\"firstname\\\": \\\"John\\\",\\\"lastname\\\": \\\"Doe\\\"}},\\\"payment_data\\\": [{\\\"type\\\": \\\"meal_voucher_payment_data\\\",\\\"meal_voucher_merchant_id\\\": \\\"15678\\\"}],\\\"capture_method\\\": \\\"AUTOMATIC\\\"}\"\n```\n\nYou can test your requests before you send them to Uber with the [OpenSSL cmd-line](https://www.openssl.org/source/). For example:\n\n```\nopenssl dgst -sha256 -verify {PUBLIC_KEY_FILE} -signature {SIGNATURE_FILE} {DECODED_HEADERS_FILE}\n```\n\n1. **PUBLIC_KEY_FILE**: Public key file\n2. **SIGNATURE_FILE**: File containing only the signature of the header, **base64** decoded. For the above example, this file contains the result of the following command:\n\n```\necho dMpg9QKPxwP5l8O6Q7OFC2vNPoJucKga1WKbvPfMY52pi20Hti/mk017OicAuYRfpH9rBsq/6g2wK0m1qqgVNY0UUvIGIrMJd9ii55YacTL/4HAv5CLPFcSDWqFUsA0W8HvvlEk6YgVD052obT6KS0Zd3qJfRJ+qS7KHkSLKAw8= | base64 -D\n```\n\n3. **DECODED_HEADERS_FILE**: File containing headers that are being used to form the signature text. The headers must appear in the same order as specified in the `headers` field of the `Signature` header.\n\n**POST request example** (body is included in digest computation):\n\n```\n(request-target): post /v1/payments/charge\nhost: uber.partner.com\ndate: Sat, 08 Jun 2019 20:51:35 GMT\ndigest: SHA-256=XLnQeHxHWlOkXmqcQaS57rSVfDBUTSUFRpvqZfLxBU0=\n```\n\n**GET request example** (digest is computed from an empty body):\n\n```\n(request-target): get /v1/payments/find-transaction?id=1234\nhost: uber.partner.com\ndate: Sat, 08 Jun 2019 20:51:35 GMT\ndigest: SHA-256=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\n```\n\nNote that for the openssl validation command to work, do not provide a line ending character at the end of **DECODED_HEADERS_FILE** or **SIGNATURE_FILE**.\n\nYou should only include :{**PORT**} in case of non-standard ports for the given scheme as we show in the example above. For example, since port **443** is the default port for the https scheme, we don’t include it in the resulting host header text in the above example with URL <https://uber.partner.com/v1/payments/charge.> If the URL is <https://uber.partner.com:9443/v1/payments/charge,> then you should provide the host header with uber.partner.com:9443.\n\nWe perform signature validation based on the order of the header items are important for the signature validation. Therefore, you should provide it as **(request-target), host, date, digest**.\n\n**You shall receive a public key via email or any of our designated communication channels.**\n",
+    "x-logo": {
+      "url": "https://tb-static.uber.com/prod/uberpay/uberpay.uber.com/assets/logo.png"
+    }
+  },
+  "tags": [
+    {
+      "name": "Partner Payment API",
+      "description": "**Partner Payment API** contains the payment endpoints that the *PSP Partner* needs to implement in order to integrate with *Uber Pay* system.\n\n### Charge lifecycle\n\nThe following flow shows the synchronous, asynchronous and user-input (3DS / SCA) variants\nof a charge, along with the manual capture, cancel and reconciliation paths.\n\n```mermaid\n---\ntitle: Partner Payment API — charge lifecycle (sync, async, user-input variants)\n---\nsequenceDiagram\n    autonumber\n    actor U as User\n    participant UP as Uber Pay\n    participant PSP as Merchant Gateway (PSP Partner)\n\n    Note over UP,PSP: All calls carry: Authorization: Bearer <access_token>,<br/>Signature (draft-cavage RSA over request-target+Date+Digest), Date, Digest\n\n    UP->>PSP: POST /charge  { amount, currency, capture_method: AUTOMATIC|MANUAL, ... }\n\n    alt Sync success\n        PSP-->>UP: 200 { state: CONFIRMED, psp_reference }\n        Note right of UP: capture_method=AUTOMATIC → done<br/>capture_method=MANUAL → charge is AUTHORIZED, awaits capture\n    else Sync reject\n        PSP-->>UP: 200 { state: REJECTED, state.detail }\n    else Async processing\n        PSP-->>UP: 200 { state: PENDING, psp_reference }\n        Note over PSP: Partner processes payment out-of-band\n        PSP->>UP: POST https://api.uber.com/v1/payments/charges/{id}  (chargeCallback)<br/>{ state: CONFIRMED|REJECTED, psp_reference, state.detail? }\n        UP-->>PSP: 200 OK\n    else Needs user input (3DS / SCA)\n        PSP-->>UP: 200 { state: PENDING, actions: [WebViewUserInputAction{url}] }\n        UP-->>U: Open WebView at action.url\n        U->>PSP: Completes authentication challenge\n        PSP->>UP: POST /v1/payments/charges/{id} (chargeCallback) — final state\n        UP-->>PSP: 200 OK\n    end\n\n    Note over UP,PSP: MANUAL capture path (after AUTHORIZED)\n    UP->>PSP: POST /charge/{id}/capture\n    alt\n        PSP-->>UP: 200 { state: CONFIRMED }\n    else\n        PSP-->>UP: 200 { state: REJECTED }\n    end\n\n    Note over UP,PSP: Cancel an AUTHORIZED charge (else expires at 72h)\n    UP->>PSP: POST /charge/{id}/cancel\n    PSP-->>UP: 200 { state: CANCELLED }\n\n    Note over UP,PSP: Reconciliation lookup\n    UP->>PSP: GET /find-transaction?id={psp_reference}\n    PSP-->>UP: 200 { transaction }\n```\n\n### Refund and balance\n\nThe following flow shows the synchronous and asynchronous refund variants and a balance inquiry.\n\n```mermaid\n---\ntitle: Partner Payment API — refund + balance\n---\nsequenceDiagram\n    autonumber\n    participant UP as Uber Pay\n    participant PSP as Merchant Gateway (PSP Partner)\n\n    Note over UP,PSP: Refund\n    UP->>PSP: POST /refund  { charge_id, amount, currency, ... }\n    alt Sync\n        PSP-->>UP: 200 { status: SUCCEEDED | FAILED }\n    else Async\n        PSP-->>UP: 200 { status: PENDING }\n        PSP->>UP: POST https://api.uber.com/v1/payments/refunds/{id}  (updateRefund)<br/>{ status: CONFIRMED | REJECTED }\n        UP-->>PSP: 200 OK\n    end\n\n    Note over UP,PSP: Balance inquiry\n    UP->>PSP: POST /balance  { payment_instrument }\n    PSP-->>UP: 200 { available_balance }\n```"
+    },
+    {
+      "name": "Partner Payout API",
+      "description": "**Partner Payout API** contains the payout endpoints that the *PSP Partner* needs to implement in order to integrate with *Uber Pay* system."
+    },
+    {
+      "name": "Partner OAuth2 API",
+      "description": "**Partner OAuth2 API** contains standard [RFC6749 OAuth2](https://datatracker.ietf.org/doc/html/rfc6749) endpoints *Uber Pay Partner* needs to implement.\n\n### Authorize and token exchange\n\nThe following flow shows the RFC 6749 Authorization Code flow used to link a user's wallet,\nfollowed by the token exchange, refresh and wallet-grant variants.\n\n```mermaid\n---\ntitle: Partner OAuth2 API — authorize + token exchange\n---\nsequenceDiagram\n    autonumber\n    actor U as User (Uber app / web-view)\n    participant UP as Uber Pay (client)\n    participant PSP as Merchant Gateway (PSP Partner)\n\n    Note over UP,PSP: RFC 6749 Authorization Code flow — used to link a user's wallet\n\n    U->>UP: Initiates wallet link\n    UP-->>U: 302 redirect user-agent to Partner /authorize\n    U->>PSP: GET /authorize?response_type=code&client_id&redirect_uri&state&scope\n    PSP-->>U: Login / consent screen (out of scope)\n    U->>PSP: Grants access\n    PSP-->>U: 302 redirect back to Uber redirect_uri?code=<AUTH_CODE>&state=<S>\n    U->>UP: Delivers code + state\n\n    Note over UP,PSP: (a) Exchange authorization_code for tokens\n    UP->>PSP: POST /token  grant_type=authorization_code, code, redirect_uri, client_id\n    PSP-->>UP: 200 { access_token, refresh_token, token_type=Bearer, expires_in, scope }\n\n    Note over UP,PSP: (b) Later — refresh short-lived access_token\n    UP->>PSP: POST /token  grant_type=refresh_token, refresh_token\n    PSP-->>UP: 200 { access_token, [refresh_token], expires_in }\n\n    Note over UP,PSP: (c) Alternate — wallet-grant custom grant type\n    UP->>PSP: POST /token  grant_type=urn:uberpay:params:oauth:grant-type:wallet-grant, wallet_reference_data\n    PSP-->>UP: 200 { refresh_token, ... }\n```"
+    },
+    {
+      "name": "Settlement Integration",
+      "description": "As part of the integration with Uber Pay, Uber's partners need to be onboarded to Uber's settlement platform for an automatic reconciliation process.\n\n### What you need to do before the launch\nAs part of the integration, we ask you to set up an SFTP folder and safely share its credentials with Uber.\n\nAs payments go through your systems, you will generate and place settlement files following an agreed upon format on a given cadence (e.g. weekly).\n\nOnce granted access, Uber's systems will be able to automatically fetch the files and ingest them into the settlement platform."
+    }
+  ],
+  "x-tagGroups": [
+    {
+      "name": "Partner API",
+      "tags": [
+        "Partner Payment API",
+        "Partner Payout API",
+        "Partner OAuth2 API"
+      ]
+    },
+    {
+      "name": "Settlement",
+      "tags": [
+        "Settlement Integration"
+      ]
+    }
+  ],
+  "servers": [
+    {
+      "url": "https://{PARTNER_BASE_URL}",
+      "description": "Base URL for partner's Uber Pay implementation.\n\nIf you need to use a different URL for a specific endpoint, please contact the Uber Pay team.",
+      "variables": {
+        "PARTNER_BASE_URL": {
+          "description": "Base URL of PSP Partner's Uber Pay API implementation.",
+          "default": "example-uberpay-psp-partner.com/uberpay/v1"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/charge": {
+      "post": {
+        "operationId": "charge",
+        "tags": [
+          "Partner Payment API"
+        ],
+        "summary": "Charge",
+        "description": "`Charge` API allows **Uber Pay** to initiate money movement with PSP Partners.\\\nA charge can be used to either authorize a payment and capture it later, or to capture it immediately without an authorization step.\n\n* If partner can process the payment request immediately, partner should respond with either `CONFIRMED`\nor `REJECTED` state and with a `psp_reference`.\n  In case of a `REJECTED` transaction, partner should indicate the reason in `state.detail`.\n* If partner cannot process the payment request immediately, partner should respond with `PENDING` state.\n  Partner should call the `chargeCallback` endpoint once payment is processed.\n  See the callbacks section below.\n* If payment requires user input to proceed, partner can respond with a `WebViewUserInputAction` in response `actions`.\n  State must be `PENDING` and `WebViewUserInputAction` must include a URL for user authorization.\n  Partner should call the `chargeCallback` endpoint once the payment is processed. See the callbacks section below.\n* If `capture_method` is `AUTOMATIC`, partner automatically captures funds when the user authorizes the payment. Processing can happen either synchronously or asynchronously.\n* If `capture_method` is `MANUAL`, partner must process the payment request immediately.\\\n  In case of a `CONFIRMED` response state, charge will move to `AUTHORIZED` state.\n  Partner must then wait for Uber's capture call for moving funds.\\\n  In case of a `REJECTED` response state, charge will move to `REJECTED` state.\n  A charge in `AUTHORIZED` state will move to `CANCELLED` state if is cancelled explicitly, or if it expires after 72h.\n\nFor the partners who support [Partner OAuth2 API](#tag/Partner-OAuth2-API), API requests include\nOAuth2 access token in Authorization header.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/acceptLanguageHeader"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "authorization": {
+                    "$ref": "#/components/schemas/Authorization"
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "Transaction id generated by Uber Pay."
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Uber’s client session id such as web session or mobile session.",
+                    "deprecated": true
+                  },
+                  "source": {
+                    "$ref": "#/components/schemas/SourceAccount"
+                  },
+                  "destination": {
+                    "$ref": "#/components/schemas/DestinationAccount"
+                  },
+                  "amount": {
+                    "$ref": "#/components/schemas/CurrencyAmount"
+                  },
+                  "description": {
+                    "$ref": "#/components/schemas/TransactionDescription"
+                  },
+                  "country_iso2": {
+                    "type": "string",
+                    "description": "The country in which this transaction is being created.\nIn [ISO3166](https://www.iso.org/iso-3166-country-codes.html) format."
+                  },
+                  "funding_method": {
+                    "type": "string",
+                    "description": "The payment method to use"
+                  },
+                  "initiated_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Transaction initiation time in [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) format."
+                  },
+                  "return_url": {
+                    "type": "string",
+                    "description": "The URL to which to redirect the user agent at the end of the flow, in case a user input action is needed.\nIt may be an HTTPs scheme or a mobile deep link."
+                  },
+                  "capture_method": {
+                    "type": "string",
+                    "description": "* `AUTOMATIC`: (default) partner automatically captures funds when user authorizes the payment\n* `MANUAL`: partner tries to authorize the payment but waits for Uber's capture call for moving funds",
+                    "enum": [
+                      "AUTOMATIC",
+                      "MANUAL"
+                    ]
+                  },
+                  "destination_owner": {
+                    "$ref": "#/components/schemas/AccountOwner"
+                  },
+                  "payment_data": {
+                    "$ref": "#/components/schemas/PaymentDataArray"
+                  }
+                },
+                "required": [
+                  "authorization",
+                  "id",
+                  "destination",
+                  "source",
+                  "amount",
+                  "description",
+                  "country_iso2",
+                  "funding_method",
+                  "initiated_at",
+                  "return_url",
+                  "capture_method"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Charge request is successfuly acknowledged by the Partner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "ChargeResponse",
+                  "type": "object",
+                  "required": [
+                    "state"
+                  ],
+                  "properties": {
+                    "state": {
+                      "$ref": "#/components/schemas/ChargeState"
+                    },
+                    "merchant_reference": {
+                      "type": "string",
+                      "description": "Payment transaction reference ID on partner side. Use `psp_reference` instead.",
+                      "deprecated": true
+                    },
+                    "psp_reference": {
+                      "type": "string",
+                      "description": "Payment transaction reference ID on partner side."
+                    },
+                    "metadata": {
+                      "description": "Additional metadata about the transaction. String key-value pairs.",
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "deprecated": true
+                    },
+                    "actions": {
+                      "$ref": "#/components/schemas/Actions"
+                    }
+                  }
+                },
+                "examples": {
+                  "charge-confirmed-sync": {
+                    "summary": "Partner processes and confirms the transaction immediately",
+                    "value": {
+                      "state": {
+                        "value": "CONFIRMED"
+                      },
+                      "psp_reference": "345s6df5678sdf"
+                    }
+                  },
+                  "charge-rejected-sync": {
+                    "summary": "Partner processes and rejects the transaction immediately",
+                    "value": {
+                      "state": {
+                        "value": "REJECTED",
+                        "detail": "INSUFFICIENT_BALANCE"
+                      }
+                    }
+                  },
+                  "charge-pending-2fa": {
+                    "summary": "Partner requests user action to process the payment (2FA)",
+                    "value": {
+                      "state": {
+                        "value": "PENDING"
+                      },
+                      "actions": [
+                        {
+                          "type": "web_view_user_input_action",
+                          "url": "https://PARTNER_2FA_URL/..."
+                        }
+                      ]
+                    }
+                  },
+                  "charge-pending-async": {
+                    "summary": "Partner acknowledges charge request but cannot process it immedieately",
+                    "value": {
+                      "state": {
+                        "value": "PENDING"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "partner-oauth2": [
+              "charge"
+            ],
+            "uberpay-http-signature-auth": []
+          },
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "callbacks": {
+          "chargeCallback": {
+            "$ref": "#/components/callbacks/chargeCallback"
+          },
+          "confirmDeposit": {
+            "$ref": "#/components/callbacks/confirmDeposit"
+          },
+          "cancelDeposit": {
+            "$ref": "#/components/callbacks/cancelDeposit"
+          },
+          "updateDeposit": {
+            "$ref": "#/components/callbacks/updateDeposit"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X POST \\\n  https://uber.partner.com/v1/payments/charge \\\n  -H 'Accept-Language: pt-BR' \\\n  -H 'Date: Sat, 08 Jun 2019 20:51:35 GMT' \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\",\n     headers=\"(request-target) host date digest\",\n     signature=\"INCLUDED_SIGNATURE\"'\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer <TOKEN>' \\\n  -H 'X-Idempotency-Key: <IDEMPOTENCY KEY>' \\\n  -d '{\n    \"authorization\": {\n      \"type\": \"access_token_authorization\",\n      \"account_id\": \"e5c30e00-914f-43af-8263-415934aa0b8c\"\n    },\n    \"id\": \"c900d4dd-7070-4e0b-9323-8f24cfde0490\",\n    \"destination\": {\n      \"owner_id\": \"105b9291-6ff1-4938-899e-4bfafa69a6c7\",\n      \"id\": \"cHBfNjFhN2QyODktZmI3Mi00YzgxLThlYjAtODRlZDIyMjFmNDNi\"\n    },\n    \"source\": {\n      \"owner_id\": \"a66b36d5-887c-4e7c-9edb-9fcbef108e83\",\n      \"id\": \"Z3NfYTE0OGQ5MzMtOGVkMS00MzA0LThiNzAtNTE0MjMyMzg2MjQw\"\n    },\n    \"amount\": {\n      \"value\": 100000,\n      \"currency\": \"BRL\"\n    },\n    \"description\": \"I\\'m a deposit in sandbox.\",\n    \"country_iso2\": \"BR\",\n    \"funding_method\": \"BOLETO\",\n    \"initiated_at\": \"2019-06-08T20:51:35Z\",\n    \"session_id\": \"8b31b7f4-3542-4391-817c-d496ce84a7ae\",\n    \"return_url\": \"uber://payments/deposit?correlation_id=c900d4dd-7070-4e0b-9323-8f24cfde0490\",\n    \"destination_owner\": {\n        \"type\": \"Customer\",\n        \"id\": \"a66b36d5-887c-4e7c-9edb-9fcbef108e83\",\n        \"uri\": \"//payments/customers/a66b36d5-887c-4e7c-9edb-9fcbef108e83\",\n        \"details\": {\n            \"mobile\": \"+123456788\",\n            \"firstname\": \"John\",\n            \"lastname\": \"Doe\"\n        }\n    },\n     \"payment_data\": [{\n          \"type\": \"meal_voucher_payment_data\",\n          \"meal_voucher_merchant_id\": \"15678\",\n          \"meal_voucher_merchant_secret\": \"abcdefg\"\n    }],\n    \"capture_method\": \"AUTOMATIC\"\n  }'\n"
+          }
+        ]
+      }
+    },
+    "/charge/{id}/capture": {
+      "post": {
+        "operationId": "capture",
+        "tags": [
+          "Partner Payment API"
+        ],
+        "summary": "Capture",
+        "description": "`Capture` API allows **Uber Pay** to capture payment on a previously authorized charge.\n\n* A successful capture will move the charge from `AUTHORIZED` to `CONFIRMED` state.\n  An unsuccessful capture will move the charge to `REJECTED` state.\n\nFor the partners who support [Partner OAuth2 API](#tag/Partner-OAuth2-API), API requests include\nOAuth2 access token in Authorization header.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/acceptLanguageHeader"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKeyHeader"
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "required": true,
+              "description": "Transaction id generated by Uber Pay in charge step."
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "psp_reference": {
+                    "type": "string",
+                    "description": "Transaction id generated by Partner during charge."
+                  },
+                  "amount_to_capture": {
+                    "$ref": "#/components/schemas/CurrencyAmount"
+                  }
+                },
+                "required": [
+                  "amount_to_capture"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Capture is successful"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureBadRequestErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Charge not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cannot capture. Charge is not in `AUTHORIZED` state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnprocessableEntityErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partner-oauth2": [
+              "charge"
+            ],
+            "uberpay-http-signature-auth": []
+          },
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X POST \\\n  https://uber.partner.com/v1/payments/charge/:id/capture \\\n  -H 'Accept-Language: pt-BR' \\\n  -H 'Date: Sat, 08 Jun 2019 20:51:35 GMT' \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\",\n     headers=\"(request-target) host date digest\",\n     signature=\"INCLUDED_SIGNATURE\"'\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer <TOKEN>' \\\n  -H 'X-Idempotency-Key: <IDEMPOTENCY KEY>' \\\n  -d '{\n    \"psp_reference\": \"partner-reference-from-charge\",\n    \"amount_to_capture\": {\n      \"value\": 100000,\n      \"currency\": \"BRL\"\n    }\n  }'\n"
+          }
+        ]
+      }
+    },
+    "/charge/{id}/cancel": {
+      "post": {
+        "operationId": "cancel",
+        "tags": [
+          "Partner Payment API"
+        ],
+        "summary": "Cancel",
+        "description": "`Cancel` API allows **Uber Pay** to cancel a previously authorized charge.\n\n* A successful cancel call moves charge to `CANCELLED` state.\n\nFor the partners who support [Partner OAuth2 API](#tag/Partner-OAuth2-API), API requests include\nOAuth2 access token in Authorization header.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/acceptLanguageHeader"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKeyHeader"
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "required": true,
+              "description": "Transaction id generated by Uber Pay in charge step."
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "psp_reference": {
+                    "type": "string",
+                    "description": "Transaction id generated by Partner during charge."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled successfully"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelBadRequestErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Charge not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cannot cancel. Charge is not in `AUTHORIZED` state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "partner-oauth2": [
+              "charge"
+            ],
+            "uberpay-http-signature-auth": []
+          },
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X POST \\\n  https://uber.partner.com/v1/payments/charge/:id/cancel \\\n  -H 'Accept-Language: pt-BR' \\\n  -H 'Date: Sat, 08 Jun 2019 20:51:35 GMT' \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\",\n     headers=\"(request-target) host date digest\",\n     signature=\"INCLUDED_SIGNATURE\"'\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer <TOKEN>' \\\n  -H 'X-Idempotency-Key: <IDEMPOTENCY KEY>' \\\n  -d '{\n    \"psp_reference\": \"partner-reference-from-charge\"\n  }'\n"
+          }
+        ]
+      }
+    },
+    "/find-transaction": {
+      "get": {
+        "operationId": "findTransaction",
+        "tags": [
+          "Partner Payment API"
+        ],
+        "summary": "Find Transaction",
+        "description": "Retrieve the current status of a transaction (charge or refund) from the Partner's system.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "Transaction id generated by Uber Pay. For refunds it will be refund ID."
+          },
+          {
+            "name": "merchant_reference",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Transaction reference in Partner’s system. This field is populated whenever it is present in our system. In some cases, e.g. charge/refund request timed out and we weren't able to retrieve merchant_reference, this field is not present."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "FindTransactionResponse",
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "merchant_reference",
+                    "status"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Original Uber transaction id"
+                    },
+                    "merchant_reference": {
+                      "type": "string",
+                      "description": "Original transaction reference in Partner’s system."
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "* `PENDING`: payment still in progress\n* `CONFIRMED`: payment confirmed\n* `AUTHORIZED`: payment is authorized but not yet captured\n* `REJECTED`: payment rejected",
+                      "enum": [
+                        "PENDING",
+                        "CONFIRMED",
+                        "REJECTED",
+                        "AUTHORIZED"
+                      ]
+                    },
+                    "confirmed_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Payment confirmed date time in Partner’s system with [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) format.\nThis field must be present if the status is SUCCEEDED."
+                    },
+                    "amount": {
+                      "$ref": "#/components/schemas/CurrencyAmount"
+                    }
+                  }
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Successful 200 response for a SUCCEEDED transaction.",
+                    "value": {
+                      "id": "cGdfMGE3OTA1OTItYTIyNi0zY2EyLWFjZjEtNzE0YTAwMzAxMmQz",
+                      "merchant_reference": "599f4164-4417-4361-9d11-1d9d8b4b9096",
+                      "status": "SUCCEEDED",
+                      "confirmed_at": "2020-04-11T12:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No transaction id"
+          },
+          "404": {
+            "description": "Transaction not found"
+          }
+        },
+        "security": [
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X GET \\\n  https://uber.partner.com/v1/payments/find-transaction?id=cGdfMGE3OTA1OTItYTIyNi0zY2EyLWFjZjEtNzE0YTAwMzAxMmQz \\\n  -H 'Date: Sat, 08 Jun 2019 20:51:35 GMT' \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\", \\\n    headers=\"(request-target) host date digest\", \\\n    signature=\"INCLUDED_SIGNATURE\"'\n"
+          }
+        ]
+      }
+    },
+    "/refund": {
+      "post": {
+        "operationId": "initRefund",
+        "tags": [
+          "Partner Payment API"
+        ],
+        "summary": "Init Refund",
+        "description": "**Uber Pay** calls this API to initiate a customer refund. Partner can\n* Issue the refund immediately and respond with `SUCCEEDED` or `FAILED` status.\n* Partners can acknowledge refund request with `PENDING` status and call Uber Pay's `updateRefund` callback API.\n\nFor the partners who support [Partner OAuth2 API](#tag/Partner-OAuth2-API), API requests include\nOAuth2 access token in Authorization header.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "RefundRequest",
+                "type": "object",
+                "required": [
+                  "id",
+                  "original_transaction_id",
+                  "original_merchant_reference",
+                  "amount"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Refund ID"
+                  },
+                  "original_transaction_id": {
+                    "type": "string",
+                    "description": "Original transaction ID in Uber system"
+                  },
+                  "original_merchant_reference": {
+                    "type": "string",
+                    "description": "Original transaction reference in a Partner’s system"
+                  },
+                  "amount": {
+                    "$ref": "#/components/schemas/CurrencyAmount"
+                  },
+                  "description": {
+                    "$ref": "#/components/schemas/TransactionDescription"
+                  },
+                  "order_refund_data": {
+                    "type": "string",
+                    "description": "Item-level refund related data for the order for the same transaction\nin the `/charge` request. Will be only populated if `/charge` had\n`PaymentData.OrderPaymentData` populated."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Refund request is acknowledged by the Partner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "RefundResponse",
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "merchant_reference"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "description": "* `PENDING`: refund still in progress, should be confirmed/rejected by callback\n* `CONFIRMED`: refund confirmed\n* `REJECTED`: refund rejected",
+                      "enum": [
+                        "CONFIRMED",
+                        "PENDING",
+                        "REJECTED"
+                      ]
+                    },
+                    "merchant_reference": {
+                      "type": "string",
+                      "description": "Refund transaction reference in Partner’s system"
+                    },
+                    "failed_reason": {
+                      "type": "string",
+                      "description": "Use only for failed refunds"
+                    }
+                  }
+                },
+                "examples": {
+                  "sync-success": {
+                    "summary": "Partner issued the refund successfully.",
+                    "value": {
+                      "status": "SUCCEEDED",
+                      "merchant_reference": "ref123"
+                    }
+                  },
+                  "sync-fail": {
+                    "summary": "Partner attempted issuing the refund immediately but the refund failed.",
+                    "value": {
+                      "status": "FAILED",
+                      "merchant_reference": "ref123",
+                      "failed_reason": "failure reason"
+                    }
+                  },
+                  "async-pending": {
+                    "summary": "Partner acknowledged the refund request to process it later. Once partner processes the refund request partner notifies Uber by using the callback api.",
+                    "value": {
+                      "status": "FAILED",
+                      "merchant_reference": "ref123"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "404": {
+            "description": "Transaction with `original_transaction_id` is not found on the Partner side."
+          }
+        },
+        "security": [
+          {
+            "partner-oauth2": [
+              "refund"
+            ],
+            "uberpay-http-signature-auth": []
+          },
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "callbacks": {
+          "updateRefund": {
+            "$ref": "#/components/callbacks/updateRefund"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X POST https://uber.merchant.com/v1/payments/refund \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\", \\\n    headers=\"(request-target) host date digest\", \\\n    signature=\"INCLUDED_SIGNATURE\"' \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Idempotency-Key: <IDEMPOTENCY KEY>' \\\n  -d '{\n    \"id\": \"46a1823d29fb4384ab03-9e07a99f0d57\",\n    \"original_transaction_id\": \"ZWF0c19jNTcyMjg5Mi0wOWMxLTQwNjItOTQxNC1lYjVhMTczNDdkYmI=\",\n    \"original_merchant_reference\": \"abcdea7e9e6bb9d6f\",\n    \"description\": \"Sample refund\",\n    \"amount\": {\n      \"value\": 100000,\n      \"currency\": \"BRL\"\n    }\n  }'\n"
+          },
+          {
+            "lang": "bash",
+            "label": "CLI with order data",
+            "source": "curl -X POST https://uber.merchant.com/v1/payments/refund \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\", \\\n    headers=\"(request-target) host date digest\", \\\n    signature=\"INCLUDED_SIGNATURE\"' \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-Idempotency-Key: <IDEMPOTENCY KEY>' \\\n  -d '{\n    \"id\": \"46a1823d29fb4384ab03-9e07a99f0d57\",\n    \"original_transaction_id\": \"ZWF0c19jNTcyMjg5Mi0wOWMxLTQwNjItOTQxNC1lYjVhMTczNDdkYmI=\",\n    \"original_merchant_reference\": \"abcdea7e9e6bb9d6f\",\n    \"description\": \"Sample refund\",\n    \"amount\": {\n      \"value\": 100000,\n      \"currency\": \"BRL\"\n    }\n    \"order_refund_data\": \"{\\\"order_id\\\":\\\"sample_order_id\\\",\\\"item_data\\\":[{\\\"item_name\\\":\\\"Item Name\\\",\\\"item_category\\\":\\\"Category\\\",\\\"item_upc\\\":\\\"UPC_ITEM_STRING\\\",\\\"item_price\\\":{\\\"value\\\":100000, \\\"currency\\\":\\\"BRL\\\"}]}}\"\n  }'\n"
+          }
+        ]
+      }
+    },
+    "/balance": {
+      "post": {
+        "operationId": "getBalance",
+        "tags": [
+          "Partner Payment API"
+        ],
+        "summary": "Get Balance",
+        "description": "Get payment instrument's available balance.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "GetBalanceRequest",
+                "type": "object",
+                "required": [
+                  "account_id",
+                  "funding_method"
+                ],
+                "properties": {
+                  "account_id": {
+                    "type": "string",
+                    "description": "Corresponds to the `account_id` in the AuthorizedAccount received during token negotiation."
+                  },
+                  "funding_method": {
+                    "type": "string",
+                    "description": "Payment method code"
+                  },
+                  "payment_data": {
+                    "$ref": "#/components/schemas/PaymentDataArray"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Balance response\n- `available_balance` represents the currently available transactional limit of the requested payment instrument. This\nmight be different than the total limit of the payment instrument due to various reasons (daily limits, transaction limits, etc.).\n- `balance` represents total balance of the payment instrument. When provided, `balance` is expected to be greater than or equal\nto `available_balance`.\n- `itemized_balances` may be used if the payment instrument has multiple balances (for different purses). Each entry\ncorresponds to a different balance, and must have a unique `display_name`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "GetBalanceResponse",
+                  "type": "object",
+                  "required": [
+                    "available_balance"
+                  ],
+                  "properties": {
+                    "available_balance": {
+                      "$ref": "#/components/schemas/CurrencyAmount"
+                    },
+                    "balance": {
+                      "$ref": "#/components/schemas/CurrencyAmount"
+                    },
+                    "itemized_balances": {
+                      "type": "array",
+                      "description": "An array of all the balances with type. These balances represent individual \nbalances per wallet or purse, if a partner supports multiple purses.\n\nEach entry corresponds to a different balance, and must have a unique `display_name`.",
+                      "items": {
+                        "$ref": "#/components/schemas/ItemizedBalance"
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Successful 200 response",
+                    "value": {
+                      "available_balance": {
+                        "value": 100000,
+                        "currency": "BRL"
+                      }
+                    }
+                  },
+                  "itemized balances": {
+                    "summary": "Successful 200 response with itemized balances",
+                    "value": {
+                      "available_balance": {
+                        "value": 100000,
+                        "currency": "BRL"
+                      },
+                      "itemized_balances": [
+                        {
+                          "display_name": "Balance Type 1",
+                          "available_balance": {
+                            "value": 1000,
+                            "currency": "BLR"
+                          },
+                          "balance": {
+                            "value": 10000,
+                            "currency": "BLR"
+                          }
+                        },
+                        {
+                          "display_name": "Balance Type 2",
+                          "available_balance": {
+                            "value": 200,
+                            "currency": "BLR"
+                          },
+                          "balance": {
+                            "value": 20000,
+                            "currency": "BLR"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Invalid signature or invalid token"
+          },
+          "404": {
+            "description": "Account not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "partner-oauth2": [
+              "get_balance"
+            ],
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X POST https://uber.partner.com/payments/v1/payments/balance \\\n  -H 'Date: Sat, 08 Jun 2019 20:51:35 GMT' \\\n  -H 'Digest: SHA-256=FkJ3miKx7I099a8n7q3Kmn7P8/dFS1Ebx5POQd185PM=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\", headers=\"(request-target) host date digest\", signature=\"INCLUDED_SIGNATURE\"' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer <TOKEN>' \\\n  -d '{\"account_id\":\"123456\",\"funding_method\":\"SODEXO_FR\",\"payment_data\":[{\"type\":\"meal_voucher_payment_data\",\"meal_voucher_merchant_id\":\"ubereats-test-1\"}]}'\n"
+          }
+        ]
+      }
+    },
+    "/payout": {
+      "post": {
+        "operationId": "payout",
+        "tags": [
+          "Partner Payout API"
+        ],
+        "summary": "Payout",
+        "description": "`Payout` API allows **Uber Pay** to create a payout with PSP Partners.\n\n* A successful payout request will move the payout to either `CONFIRMED` or `PENDING` state.\n  * If the Partner cannot process the payout immediately, the Partner should respond with `PENDING` state.\n  The partner should then use `Finalize payout` endpoint once the payout is processed. See the callbacks section below.\n  * If the Partner can process the payout immediately, the Partner should respond with `CONFIRMED` state.\n* An unsuccessful payout request will move the payout to `REJECTED` state.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          },
+          {
+            "$ref": "#/components/parameters/acceptLanguageHeader"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Transaction ID generated by Uber Pay."
+                  },
+                  "payer": {
+                    "$ref": "#/components/schemas/PayerAccount"
+                  },
+                  "amount": {
+                    "$ref": "#/components/schemas/CurrencyAmount"
+                  },
+                  "description": {
+                    "$ref": "#/components/schemas/TransactionDescription"
+                  },
+                  "country_iso2": {
+                    "type": "string",
+                    "description": "The country in which the payout is being created in [ISO3166](https://www.iso.org/iso-3166-country-codes.html) format."
+                  },
+                  "funding_method": {
+                    "type": "string",
+                    "description": "The payment method to use."
+                  },
+                  "initiated_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Payout initiation time in [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) format."
+                  },
+                  "payee": {
+                    "$ref": "#/components/schemas/Payee"
+                  }
+                },
+                "required": [
+                  "id",
+                  "payer",
+                  "amount",
+                  "description",
+                  "country_iso2",
+                  "funding_method",
+                  "initiated_at",
+                  "payee"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payout request is successfuly acknowledged by the Partner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "PayoutResponse",
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "$ref": "#/components/schemas/PayoutState"
+                    },
+                    "psp_reference": {
+                      "type": "string",
+                      "description": "Transaction reference ID in Partner’s system."
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "psp_reference"
+                  ]
+                },
+                "examples": {
+                  "payout-sync": {
+                    "summary": "Partner processes and confirms the payout immediately.",
+                    "value": {
+                      "state": {
+                        "value": "CONFIRMED"
+                      },
+                      "psp_reference": "345s6df5678sdf"
+                    }
+                  },
+                  "payout-async": {
+                    "summary": "Partner acknowledges the payout request but cannot process it immediately.",
+                    "value": {
+                      "state": {
+                        "value": "PENDING"
+                      },
+                      "psp_reference": "345s6df5678sdf"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutBadRequestErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutConflictErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutUnprocessableEntityErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ],
+        "callbacks": {
+          "payoutCallback": {
+            "$ref": "#/components/callbacks/payoutCallback"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "CLI",
+            "source": "curl -X POST \\\n  https://uber.partner.com/v1/payments/payout \\\n  -H 'Accept-Language: es-CL' \\\n  -H 'Date: Tue, 04 Jul 2023 00:00:00 GMT' \\\n  -H 'Digest: SHA-256=AJz4TQ6Ma9ZTQ1w3bpx/6nsbwB/AnMztrk1ztvayi0Q=' \\\n  -H 'Signature: keyId=\"rsa-key\", algorithm=\"rsa-sha256\",\n     headers=\"(request-target) host date digest\",\n     signature=\"INCLUDED_SIGNATURE\"'\n  -H 'Content-Type: application/json' \\\n  -H 'X-Idempotency-Key: <IDEMPOTENCY KEY>' \\\n  -d '{\n   \"funding_method\": \"TEST_MOBILE_WALLET\",\n   \"destination\": {\n     \"id\": \"cHBfNjFhN2QyODktZmI3Mi00YzgxLThlYjAtODRlZDIyMjFmNDNi\",\n     \"owner_id\": \"105b9291-6ff1-4938-899e-4bfafa69a6c7\",\n     \"type\": \"Account\",\n   },\n   \"amount\": {\n     \"value\": 100000,\n     \"currency\": \"CLP\"\n   },\n   \"country_iso2\": \"CL\",\n   \"description\": \"I\\'m a payout in sandbox\",\n   \"initiated_at\": \"2023-07-04T00:00:00Z\",,\n   \"id\": \"uber-transaction-id\",\n   \"payee\":{\n     \"account\":{\n         \"type\": \"MOBILE_WALLET\",\n         \"account_id\": \"+56912345678\"\n      }\n     \"name\": \"John Doe\",\n     \"local_name\": \"Juan Duan\",\n     \"date_of_birth\": \"2000-04-17\",\n     \"document\": {\n         \"type\":\"RUT\",\n         \"id\":\"19876543-2\"\n        },\n     \"address\": {\n          \"address\":\"Avenida Libertador Bernardo O'Higgins 1234\",\n          \"state_province\":\"Santiago Metropolitan Region\",\n          \"city\":\"Santiago\",\n          \"post_code\":\"1234567\",\n       }\n    }\n  }'\n"
+          }
+        ]
+      }
+    },
+    "/authorize": {
+      "get": {
+        "operationId": "authorize",
+        "tags": [
+          "Partner OAuth2 API"
+        ],
+        "summary": "Authorize",
+        "description": "**Note: This endpoint is a Partner provided web-page (not a json endpoint) for OAuth2 Authorization requests**\n\n**See: [RFC6749 Section 3.1](https://datatracker.ietf.org/doc/html/rfc6749#section-3.1)**\n\nThe Partner provided authorization endpoint is used to interact with the resource\nowner(user) and obtain an authorization grant.  The authorization server\nMUST first verify the identity of the resource owner.  The way in\nwhich the authorization server authenticates the resource owner\n(e.g., username and password login, session cookies) is beyond the\nscope of this specification.\n\n\n**Authorization Code Response:**\n\nIf the resource owner(user) grants the access request, Partner's authorization\nserver issues an authorization code and delivers it to the client by\nadding the following parameters to the query component of the\nredirection URI using the `application/x-www-form-urlencoded` format,\nper [RFC6749 Appendix B](https://datatracker.ietf.org/doc/html/rfc6749#appendix-B):\n\n  - `code`: The authorization code generated by Partner's authorization server.\n    The authorization code MUST expire shortly after it is issued to mitigate the risk of leaks.\n    A maximum authorization code lifetime of 10 minutes is RECOMMENDED.\n    Uber Pay will not use the authorization code more than once. If an authorization code\n    is used more than once, the authorization server MUST deny the request and SHOULD revoke\n    (when possible) all tokens previously issued based on\n    that authorization code.  The authorization code is bound to\n    the client identifier and redirection URI.\n\n  - `state`: if the \"state\" parameter was present in the client authorization request. The exact value received from the client. An opaque value for authorization server. Uber Pay uses this to maintain state between `/authorize` call and authorization server initiated user-agent redirect.\n\n  Here is an example response, or redirect URI:\n  ```\n  uber://ubercash_topup?code=ZmVmYmRlOGItNzZlOS00OWJkLTg3ZGUtN2IxMGI3MGIwNmU3&state=c29tZV9zdGF0ZQ==\n  ```\n\n**Error Response:**\n\nIf the resource owner(user) denied the authorization request, Partner's authorization server\nprovides the following parameters to the query component of the redirection URI using\nthe `application/x-www-form-urlencoded` format,\nper [RFC6749 Appendix B](https://datatracker.ietf.org/doc/html/rfc6749#appendix-B):\n\n  - `error`: a single ASCII error code from the following list:\n    * `invalid_request` - the the request is missing a parameter, contains an invalid parameter, includes a parameter more than once, or is otherwise invalid.\n    * `access_denied` - the client or authorization server denied the request\n    * `unauthorized_client` - the client is not allowed to request an authorization code using this method, for example if a confidential client attempts to use the implicit grant type.\n    * `unsupported_grant_type` - the authorization server does not support obtaining an authorization code using this method, for example if the authorization server never implemented the implicit grant type.\n    * `invalid_scope` - the requested scope is invalid, unknown, malformed, or exceeds the scope granted by the resource owner.\n    * `server_error` - instead of displaying a 500 Internal Server Error page to the client, the server can redirect with this error code.\n    * `temporarily_unavailable` - if the authorization server is undergoing maintenance, or is otherwise unavailable, this error code can be returned instead of responding with a 503 Service Unavailable status code.\n\n  - `error_description`: human-readable text providing additional information, used to assist Uber Pay in understanding the error that occurred. Encoded as ASCII.\n\n  - `error_uri`: a URI identifying a human-readable web page with information about the error, used to provide Uber Pay with additional information about the error. Values for the \"error_uri\" parameter MUST conform to the URI-reference syntax.\n\n  - `state`: if the \"state\" parameter was present in the client authorization request. The exact value received from the client. An opaque value for authorization server. Uber Pay uses this to maintain state between `/authorize` call and authorization server initiated user-agent redirect.\n\n  Here is an example response, or redirect URI:\n  ```\n  com.ubercab://uber_pay_authorization_success?error=access_denied&state=eyJtZXJjaGFudElkIjoiOGJkZmEwZTQtOWVlMC00M2E5LWEzN2EtNjAzNjYxOTdkNzE2IiwiZGV2aWNlU2Vzc2lvbklkIjoiRjI0MEM1QjAtNTE3Qi00NEZGLUI3RkEtNUZFRjc3Q0YzRDMzIn0%3D\n  ```",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The client id issued by Partner to Uber Pay"
+          },
+          {
+            "in": "query",
+            "name": "response_type",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Partner redirects user-agent to this `redirect_uri` once authorization is completed at partner's end.\n\n* `redirect_uri` must not be manipulated in any way.\n* `redirect_uri` can be an `https` web uri as well as a mobile deep link.\n* `redirect_uri` we discourage allowlisting redirect_uri as it may change.",
+            "example": "uber://ubercash_topup/example"
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A list of space-delimited, case-sensitive strings. See [RFC6749 Section 3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).\nAvailable scopes:\n- charge\n- get_balance\n- offline_access\n- refund"
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "An opaque value for Partner. Uber Pay uses this to maintain state between `/authorize`\ncall and Partner initiated user-agent redirect."
+          },
+          {
+            "in": "query",
+            "name": "authorization_details",
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "description": "Array of `AuthorizationDetail` objects, serialized as json string.",
+                  "items": {
+                    "$ref": "#/components/schemas/AuthorizationDetail"
+                  }
+                }
+              }
+            },
+            "description": "JSON string representation of an array of `AuthorizationDetail` objects.\nUber provides additional metadata for the authorization.\n\nSee [OAuth 2.0 Rich Authorization Requests](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-rar-03#section-2)."
+          }
+        ],
+        "responses": {}
+      }
+    },
+    "/token": {
+      "post": {
+        "operationId": "createToken",
+        "tags": [
+          "Partner OAuth2 API"
+        ],
+        "summary": "Create Token",
+        "description": "OAuth 2 token endpoint as described in [RFC6749 Section 3.2](https://datatracker.ietf.org/doc/html/rfc6749#section-3.2).\nThe token endpoint provides:\n1. Obtaining `refresh_token` by providing `authorization_code`.\n    **Uber Pay** gets authorization code at the end of authorization flow (when partner redirects user at the end of GET /authorize flow).\n    Refresh tokens are expected to have longer validity period.\n2. Obtaining `access_token` by providing `refresh_token`.\n    **Uber Pay** exchanges long-lived refresh_token it holds with a short-lived `access_token`.\n3. Obtaining `refresh_token` by providing `wallet_reference_data`.\n    **Uber Pay** exchanges wallet reference data for a `refresh_token`\n    using the custom grant type `urn:uberpay:params:oauth:grant-type:wallet-grant`.\n    Refresh tokens are expected to have a longer validity period.\n\nIn case of an `invalid_grant` error, **Uber Pay** re-initiates authorization flow.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/contentTypeHeader"
+          },
+          {
+            "$ref": "#/components/parameters/dateHeader"
+          },
+          {
+            "$ref": "#/components/parameters/digestHeader"
+          },
+          {
+            "$ref": "#/components/parameters/signatureHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RefreshTokenRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AccessTokenRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WalletGrantRefreshTokenRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RefreshTokenResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccessTokenResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WalletGrantRefreshTokenResponse"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OAuth2ClientErrorResponse"
+          }
+        },
+        "security": [
+          {
+            "uberpay-http-signature-auth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "IdempotencyKey": {
+        "type": "string",
+        "description": "Idempotency key"
+      },
+      "CurrencyAmount": {
+        "type": "object",
+        "description": "Value of currency, ISO4217. The value is in E5 format. For example, 10 BRL is: {\"value\": 1000000, \"currency\": \"BRL\"}.",
+        "example": {
+          "currency": "BRL",
+          "value": 1000000
+        },
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217, 3-letter currency code.",
+            "example": "EUR",
+            "maxLength": 3,
+            "minLength": 3
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Currency value in E5 format. For example  10.00 BRL  is represented as 1000000."
+          }
+        },
+        "required": [
+          "currency",
+          "value"
+        ]
+      },
+      "ItemizedBalance": {
+        "type": "object",
+        "description": "- `available_balance` represents the currently available transactional limit of the requested payment instrument. This\nmight be different than the total limit of the payment instrument due to various reasons (daily limits, transaction limits, etc.).\n- `balance` represents total balance of the payment instrument. When provided, `balance` is expected to be greater than or equal\nto `available_balance`.",
+        "example": {
+          "available_balance": {
+            "value": 10000,
+            "currency": "BRL"
+          },
+          "balance": {
+            "value": 100000,
+            "currency": "BRL"
+          }
+        },
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "A User-facing string that identifies this balance type. Alphanumeric characters and `_`, `-`. Up to 256 chars.",
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9-_ ]*$"
+          },
+          "available_balance": {
+            "$ref": "#/components/schemas/CurrencyAmount"
+          },
+          "balance": {
+            "$ref": "#/components/schemas/CurrencyAmount"
+          }
+        },
+        "required": [
+          "display_name",
+          "available_balance"
+        ]
+      },
+      "TransactionDescription": {
+        "type": "string",
+        "description": "Alphanumeric characters and `_`, `-`. Up to 256 chars.",
+        "maxLength": 256,
+        "pattern": "^[A-Za-z0-9-_ ]*$"
+      },
+      "PaymentDataArray": {
+        "type": "array",
+        "description": "Additional payment data for specific use cases.\n\nAll `PaymentData` objects are guaranteed to have a `type` field.\n\nFor \"Meal Voucher\" balance requests there will be one object with `type` equals to `meal_voucher_payment_data`.",
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/MealVoucherPaymentData"
+            },
+            {
+              "$ref": "#/components/schemas/PointConversionPaymentData"
+            },
+            {
+              "$ref": "#/components/schemas/OrderPaymentData"
+            }
+          ]
+        }
+      },
+      "MealVoucherPaymentData": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "meal_voucher_payment_data"
+            ]
+          },
+          "meal_voucher_merchant_id": {
+            "type": "string",
+            "description": "The merchant ID of a restaurant"
+          },
+          "meal_voucher_merchant_secret": {
+            "type": "string",
+            "description": "Additional information to identify the merchant, if applicable."
+          }
+        },
+        "required": [
+          "type",
+          "meal_voucher_merchant_id"
+        ]
+      },
+      "OrderPaymentData": {
+        "description": "Order related data for the transaction.\n\n`type` equals `order_payment_data`\n`order_id` represents a unique reference to the order",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "order_payment_data"
+            ]
+          },
+          "order_id": {
+            "type": "string",
+            "description": "A unique identifier that references order data."
+          }
+        },
+        "required": [
+          "type",
+          "order_id"
+        ]
+      },
+      "PointConversionPaymentData": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "point_conversion_payment_data"
+            ]
+          },
+          "points_to_charge_e5": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The value in E5 format, meaning value should multiplied by 10^5.\nFor instance, `10.32` points is represented as `1032000` in e5 format."
+          }
+        },
+        "required": [
+          "type",
+          "points_to_charge_e5"
+        ]
+      },
+      "Authorization": {
+        "description": "The type of authorization associated with this money movement.\n\nAll future types are guaranteed to have a type field.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WebViewAuthorization"
+          },
+          {
+            "$ref": "#/components/schemas/AccessTokenAuthorization"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "web_view_authorization": "#/components/schemas/WebViewAuthorization",
+            "access_token_authorization": "#/components/schemas/AccessTokenAuthorization"
+          }
+        }
+      },
+      "WebViewAuthorization": {
+        "type": "object",
+        "description": "Web View Authorization",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "web_view_authorization"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "AccessTokenAuthorization": {
+        "type": "object",
+        "description": "Access Token Authorization",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "access_token_authorization"
+            ]
+          },
+          "account_id": {
+            "type": "string",
+            "description": "The ID of the account to charge"
+          }
+        },
+        "required": [
+          "type",
+          "account_id"
+        ]
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Account"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "The ID of the account"
+          },
+          "owner_id": {
+            "type": "string",
+            "description": "The ID of the account owner"
+          },
+          "uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URI of the account",
+            "deprecated": true
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name"
+        ]
+      },
+      "SourceAccount": {
+        "description": "Source account is an internal Uber reference for Partner's settlement account",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Account"
+          }
+        ]
+      },
+      "DestinationAccount": {
+        "description": "Destination account identifying an Uber customer.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Account"
+          }
+        ]
+      },
+      "PayerAccount": {
+        "description": "Payer account is an internal Uber reference for Partner's settlement account",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Account"
+          }
+        ]
+      },
+      "AccountOwner": {
+        "type": "object",
+        "description": "Details about the owner of the destination account.\nContains information you need to complete payment for the funding method and country in the request.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ID of the account owner"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "Customer"
+            ]
+          },
+          "uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URI of the account owner",
+            "deprecated": true
+          },
+          "details": {
+            "$ref": "#/components/schemas/AccountOwnerDetails"
+          }
+        }
+      },
+      "AccountOwnerDetails": {
+        "type": "object",
+        "properties": {
+          "mobile": {
+            "type": "string",
+            "description": "The mobile number of the account owner"
+          },
+          "firstname": {
+            "type": "string",
+            "description": "The first name of the account owner"
+          },
+          "lastname": {
+            "type": "string",
+            "description": "The last name of the account owner"
+          }
+        }
+      },
+      "AuthorizationDetail": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "authorization_detail"
+            ]
+          },
+          "funding_method": {
+            "type": "string",
+            "description": "Payment method code"
+          },
+          "country_iso2": {
+            "type": "string",
+            "description": "The country in which this user resides in, in [ISO3166](https://www.iso.org/iso-3166-country-codes.html) format"
+          },
+          "locale": {
+            "type": "string",
+            "description": "User preferred language as a BCP 47 code, for example en-GB or pt-BR"
+          },
+          "account_id": {
+            "type": "string",
+            "description": "Used in case a previously-acquired Refresh Token is unusable, or revoked,\nand the User needs to Re-Authorize access to a specific Payment Account"
+          }
+        },
+        "required": [
+          "type",
+          "funding_method",
+          "country_iso2",
+          "locale"
+        ]
+      },
+      "AuthorizedAccount": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "authorized_account"
+            ]
+          },
+          "account_id": {
+            "type": "string",
+            "description": "A unique identifier for the Payment Account within this Payment Method."
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "A string that uniquely identifies the instrument for duplication and fraud detection within Uber.\n\nFor example, iDEAL, for the same underlying IBAN the Partner provides us the same reference value,\nso we know if someone else adds the same bank account on another Uber account, without having to\nknow the IBAN bank account number."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "A User-facing string that identifies this account.\n\nThis is particularly important when the Payment Method allows for several accounts.\nFor example this can be the email address associated with a PayPal account."
+          }
+        },
+        "required": [
+          "type",
+          "account_id",
+          "fingerprint",
+          "display_name"
+        ]
+      },
+      "StateReasonCode": {
+        "type": "string",
+        "enum": [
+          "BANK_SOFT_ERROR",
+          "INSUFFICIENT_BALANCE",
+          "PAYMENT_FRAUD_ERROR",
+          "PAYMENT_NETWORK_ERROR",
+          "PAYMENT_PSP_ERROR",
+          "VALIDATION_ERROR",
+          "BANK_HARD_ERROR",
+          "PAYMENT_PSP_HARD_DECLINE_ERROR",
+          "INSTRUMENT_EXPIRED_HARD_ERROR",
+          "INVALID_PAYMENT_DETAILS_ERROR",
+          "USER_CANCELLED",
+          "MERCHANT_EXPIRED",
+          "MERCHANT_REJECTED",
+          "PAYMENT_ERROR"
+        ],
+        "description": "* `BANK_SOFT_ERROR` - The user should contact their bank to resolve the error. The payment can be retried later on.\n* `INSUFFICIENT_BALANCE` - The transaction failed because of insufficient balance.\n* `PAYMENT_FRAUD_ERROR` - Generic error for fraud related issues.\n* `PAYMENT_NETWORK_ERROR` - Generic network error for payments.\n* `PAYMENT_PSP_ERROR` - The PSP is currently not able to process the transaction. The transaction should be retried.\n* `VALIDATION_ERROR` - The payment request is invalid.\n* `BANK_HARD_ERROR` - This transaction failed and it should not be retried. The user needs to check with their bank to find out why.\n* `PAYMENT_PSP_HARD_DECLINE_ERROR` - This error indicates a hard failure in the PSP side. It should not be retried.\n* `INSTRUMENT_EXPIRED_HARD_ERROR` - User’s payment instrument is expired. It needs to be fixed before the payment method can be used for future transaction.\n* `INVALID_PAYMENT_DETAILS_ERROR` - Payment info provided by the user is rejected by the provider.\n* `USER_CANCELLED` - User cancels during payment initiation flow.\n* `MERCHANT_EXPIRED` - User did not pay after a specific period.\n* `MERCHANT_REJECTED` - Partner refuses to process.\n* `PAYMENT_ERROR` - Generic payment error. This should not be used unless there is not any more specific error that can be used."
+      },
+      "ChargeState": {
+        "type": "object",
+        "description": "Status of the money movement request. If the partner implementation:\n* Can process the money movement request immediately (**Synchronous**),\n  the response must be either `CONFIRMED` or `REJECTED`.\n* Cannot process the money movement request immediately (**Asynchronous**),\n  the response must be `PENDING`. Meaning the partner acknowledges the\n  request and the processing will happen asynchronously.",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "CONFIRMED",
+              "REJECTED"
+            ]
+          },
+          "detail": {
+            "$ref": "#/components/schemas/StateReasonCode"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "ChargeCallbackState": {
+        "type": "object",
+        "description": "Status of the charge. The value must be set with one of the following status codes:\n* `CONFIRMED` if partner processed the charge.\n* `REJECTED` if partner rejected the charge.",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "CONFIRMED",
+              "REJECTED"
+            ]
+          },
+          "detail": {
+            "$ref": "#/components/schemas/StateReasonCode"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "Actions": {
+        "type": "array",
+        "description": "If an action is needed on the Uber side. For example, if a user input is needed,\ninclude a `WebViewUserInputAction` while setting the `state.value` value to `PENDING`.\n\nAll Action types are guaranteed to have a `type` field.",
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/WebViewUserInputAction"
+            },
+            {
+              "$ref": "#/components/schemas/QRCodeInputAction"
+            }
+          ]
+        }
+      },
+      "WebViewUserInputAction": {
+        "type": "object",
+        "description": "WebViewUserInputAction: User input required to perform a transaction.\nUber's user agent opens specified `url` in a web view.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "web_view_user_input_action"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL to open the web view to collect user input"
+          }
+        },
+        "required": [
+          "type",
+          "url"
+        ]
+      },
+      "QRCodeInputAction": {
+        "type": "object",
+        "description": "QRCodeInputAction: User input required to perform a transaction.\nUber's user agent opens specified `QR` code.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "qr_code_input_action"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "description": "The QR Code to pay the driver"
+          },
+          "expiry_time_millis": {
+            "type": "integer",
+            "description": "The Expiry time in UNIX millis"
+          }
+        },
+        "required": [
+          "type",
+          "code"
+        ]
+      },
+      "Deposit": {
+        "type": "object",
+        "description": "Represents money movement at Uber Pay end.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceAccount"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/DestinationAccount"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DepositState"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/CurrencyAmount"
+          },
+          "description": {
+            "type": "string"
+          },
+          "merchant_reference": {
+            "type": "string",
+            "description": "Transaction reference id in Partner’s system."
+          },
+          "metadata": {
+            "description": "Additional metadata about the transaction. String key-value pairs.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "country_iso2": {
+            "type": "string",
+            "description": "The country in which this transaction is being created. In [ISO3166](https://www.iso.org/iso-3166-country-codes.html) format."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation date-time in [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) format."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last updated date-time in [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) format."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "funding_method": {
+            "type": "string",
+            "description": "Payment method code"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "Deposit"
+            ]
+          },
+          "uri": {
+            "type": "string",
+            "format": "uri",
+            "deprecated": true
+          }
+        }
+      },
+      "DepositState": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "PENDING",
+              "CONFIRMED",
+              "CANCELLED",
+              "REJECTED"
+            ]
+          },
+          "detail": {
+            "$ref": "#/components/schemas/StateReasonCode"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "OAuth2Error": {
+        "type": "object",
+        "description": "The authorization server responds with an HTTP 400 (Bad Request)\nstatus code (unless specified otherwise).\n\nSee [RFC6749 Section 5.2](https://datatracker.ietf.org/doc/html/rfc6749#section-5.2).",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "* `invalid_request` - The request is missing a required parameter, includes an\n   unsupported parameter value (other than grant type),\n   repeats a parameter, includes multiple credentials,\n   utilizes more than one mechanism for authenticating the\n   client, or is otherwise malformed.\n* `invalid_client` - Client authentication failed (e.g., unknown client, no\n   client authentication included, or unsupported\n   authentication method).  The authorization server MAY\n   return an HTTP 401 (Unauthorized) status code to indicate\n   which HTTP authentication schemes are supported.  If the\n   client attempted to authenticate via the \"Authorization\"\n   request header field, the authorization server MUST\n   respond with an HTTP 401 (Unauthorized) status code and\n   include the \"WWW-Authenticate\" response header field\n   matching the authentication scheme used by the client.\n* `invalid_grant` - The provided authorization grant (e.g., authorization\n   code, resource owner credentials) or refresh token is\n   invalid, expired, revoked, does not match the redirection\n   URI used in the authorization request, or was issued to\n   another client.\n* `unauthorized_client` - The authenticated client is not authorized to use this\n   authorization grant type.\n* `unsupported_grant_type` - The authorization grant type is not supported by the\n   authorization server.\n* `invalid_scope` - The requested scope is invalid, unknown, malformed, or\n   exceeds the scope granted by the resource owner.\n* `unsupported_token_type` - (**only in token revoke responses**) The authorization server does not support\n   the revocation of the presented token type.  That is, the\n   client tried to revoke an access token on a server not\n   supporting this feature.",
+            "enum": [
+              "invalid_request",
+              "invalid_client",
+              "invalid_grant",
+              "unauthorized_client",
+              "unsupported_grant_type",
+              "invalid_scope",
+              "unsupported_token_type"
+            ]
+          },
+          "error_description": {
+            "type": "string",
+            "description": "Human-readable text providing additional information, used to assist Uber Pay in\nunderstanding the error that occurred.\nAccording to the OAuth 2.0 specification, the error description is encoded as ASCII.\nUber Pay uses the entire Unicode set, encoded as UTF-8 and URL-encoded if necessary."
+          },
+          "error_uri": {
+            "type": "string",
+            "description": "A URI identifying a human-readable web page with\ninformation about the error, used to provide Uber Pay\nwith additional information about the error.\nValues for the \"error_uri\" parameter MUST conform to the URI-reference syntax."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "CreateTokenRequest": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "Client ID provided by Partner to Uber Pay"
+          },
+          "client_secret": {
+            "type": "string",
+            "description": "Client secret providede by Partner to Uber Pay. See [RFC6749 Section 2.3.1](https://datatracker.ietf.org/doc/html/rfc6749#section-2.3.1)."
+          },
+          "grant_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_secret",
+          "grant_type"
+        ]
+      },
+      "RefreshTokenRequest": {
+        "description": "Obtain a `refresh_token` by authorization code that is received from Partner as a result of earlier authorization (`GET /authorize`) flow.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CreateTokenRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "grant_type": {
+                "description": "Use `authorization_code` for requests which send authorization `code` and receive `refresh_token`.",
+                "type": "string",
+                "enum": [
+                  "authorization_code"
+                ]
+              },
+              "code": {
+                "type": "string",
+                "description": "Authorization code. **Uber Pay** receives uses the authorization code obtained at the end of authorization flow."
+              },
+              "redirect_uri": {
+                "type": "string",
+                "description": "Identical to the `redirect_uri` which was used in authorization flow."
+              }
+            },
+            "required": [
+              "code",
+              "redirect_uri"
+            ]
+          }
+        ]
+      },
+      "AccessTokenRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CreateTokenRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "grant_type": {
+                "description": "Use `refresh_token` for requests which send `refresh_token` and receive `access_token`.",
+                "type": "string",
+                "enum": [
+                  "refresh_token"
+                ]
+              },
+              "refresh_token": {
+                "type": "string",
+                "description": "Refresh token obtained from Partner earlier by `POST /token` call."
+              }
+            },
+            "required": [
+              "refresh_token"
+            ]
+          }
+        ]
+      },
+      "WalletGrantRefreshTokenRequest": {
+        "description": "Obtain a `refresh_token` by exchanging wallet reference data. Use `urn:uberpay:params:oauth:grant-type:wallet-grant` for requests which send wallet reference data and receive `refresh_token`. Extension grants use absolute URIs as defined in [RFC6749 Section 4.5](https://datatracker.ietf.org/doc/html/rfc6749#section-4.5).",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CreateTokenRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "grant_type": {
+                "description": "Use `urn:uberpay:params:oauth:grant-type:wallet-grant` for requests which send wallet reference data and receive `refresh_token`. Extension grants use absolute URIs as defined in [RFC6749 Section 4.5](https://datatracker.ietf.org/doc/html/rfc6749#section-4.5).",
+                "type": "string",
+                "enum": [
+                  "urn:uberpay:params:oauth:grant-type:wallet-grant"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "description": "A list of space-delimited, case-sensitive strings. See [RFC6749 Section 3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3). Available scopes:\n* charge\n* get_balance\n* offline_access\n* refund"
+              },
+              "funding_method": {
+                "type": "string",
+                "description": "Payment method code"
+              },
+              "country_iso2": {
+                "type": "string",
+                "description": "The country in which this user resides in, in ISO3166 format"
+              },
+              "account_id": {
+                "type": "string",
+                "description": "Specifies the Payment Account identifier when obtaining a Refresh Token after the previous token has expired, been revoked, or become invalid."
+              },
+              "wallet_reference_data": {
+                "$ref": "#/components/schemas/WalletReferenceData"
+              }
+            },
+            "required": [
+              "scope",
+              "funding_method",
+              "country_iso2",
+              "wallet_reference_data"
+            ]
+          }
+        ]
+      },
+      "WalletReferenceData": {
+        "type": "object",
+        "description": "Payment instrument reference details",
+        "properties": {
+          "payment_identifier": {
+            "type": "string",
+            "description": "Reference identifier of the instrument."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name of the instrument."
+          }
+        },
+        "required": [
+          "payment_identifier"
+        ]
+      },
+      "CreateTokenResponse": {
+        "type": "object",
+        "properties": {
+          "expires_in": {
+            "type": "string",
+            "description": "Time before expiration in seconds"
+          }
+        }
+      },
+      "RefreshTokenResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "refresh_token": {
+                "type": "string",
+                "description": "Refresh token used to obtain access token. Partner implementation must not permit use of this token in other endpoints (charge, refund etc.)\n\n**See [RFC6749 Section 1.5](https://datatracker.ietf.org/doc/html/rfc6749#section-1.5)**"
+              },
+              "token_type": {
+                "type": "string",
+                "enum": [
+                  "bearer"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "description": "Authorized scope according to the requested scopes in earlier `GET /authorize` request."
+              },
+              "authorization_details": {
+                "description": "As defined in [OAuth 2.0 Rich Authorization Requests. Section 3.4.1](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-rar-03#section-3.4.1).",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AuthorizedAccount"
+                }
+              }
+            },
+            "required": [
+              "refresh_token",
+              "token_type",
+              "authorization_details"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/CreateTokenResponse"
+          }
+        ]
+      },
+      "AccessTokenResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "access_token": {
+                "type": "string",
+                "description": "Access token issued by Partner.\nWe recommend a maximum access token lifetime of 10 minutes."
+              },
+              "token_type": {
+                "type": "string",
+                "enum": [
+                  "bearer"
+                ]
+              }
+            },
+            "required": [
+              "access_token",
+              "token_type"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/CreateTokenResponse"
+          }
+        ]
+      },
+      "WalletGrantRefreshTokenResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "refresh_token": {
+                "type": "string",
+                "description": "Refresh token used to obtain access token. Partner implementation must not permit use of this token in other endpoints (charge, refund etc.)\n\n**See [RFC6749 Section 1.5](https://datatracker.ietf.org/doc/html/rfc6749#section-1.5)**"
+              },
+              "token_type": {
+                "type": "string",
+                "enum": [
+                  "bearer"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "description": "Authorized scope according to the requested scopes in the grant request."
+              },
+              "authorization_details": {
+                "description": "As defined in [OAuth 2.0 Rich Authorization Requests. Section 3.4.1](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-rar-03#section-3.4.1). Contains account information for the authorized payment instrument.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AuthorizedAccount"
+                }
+              }
+            },
+            "required": [
+              "refresh_token",
+              "token_type",
+              "authorization_details"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/CreateTokenResponse"
+          }
+        ]
+      },
+      "CaptureBadRequestErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `EXCEEDS_CAPTURE_LIMIT`: Capture amount exceeds authorized amount.\n* `VALIDATION_ERROR`: The payment request is invalid.",
+                "enum": [
+                  "EXCEEDS_CAPTURE_LIMIT",
+                  "VALIDATION_ERROR"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "CancelBadRequestErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `VALIDATION_ERROR`: The payment request is invalid.",
+                "enum": [
+                  "VALIDATION_ERROR"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "UnprocessableEntityErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `BANK_HARD_ERROR`: This transaction failed and it should not be retried. The user needs to check with their bank to find out why.\n* `BANK_SOFT_ERROR`: The user should contact their bank to resolve the error. The payment can be retried later on.",
+                "enum": [
+                  "BANK_HARD_ERROR",
+                  "BANK_SOFT_ERROR"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "NotFoundErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `RESOURCE_NOT_FOUND`: Could not find the requested resource.",
+                "enum": [
+                  "RESOURCE_NOT_FOUND"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "ConflictErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `INVALID_CHARGE_STATE`: Charge is in a state where this operation cannot be called.",
+                "enum": [
+                  "INVALID_CHARGE_STATE"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "ErrorDescription": {
+        "type": "string",
+        "description": "Human readable text providing additional information, used to assist Uber Pay in understanding the error that occurred."
+      },
+      "Payee": {
+        "type": "object",
+        "description": "Payee information. Contains information required to process the payout.",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountData"
+          },
+          "name": {
+            "type": "string",
+            "description": "Payee name."
+          },
+          "local_name": {
+            "type": "string",
+            "description": "Payee local name."
+          },
+          "date_of_birth": {
+            "type": "string",
+            "description": "Payee date of birth in [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html) format."
+          },
+          "address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "document": {
+            "$ref": "#/components/schemas/Document"
+          }
+        },
+        "required": [
+          "account",
+          "name"
+        ]
+      },
+      "Document": {
+        "type": "object",
+        "description": "Payee identification document.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Payee identification document type.\n* `RUT`: Tax identification number in Chile.\n* `CUIT`: Tax identification number in Argentina.",
+            "enum": [
+              "RUT",
+              "CUIT"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Payee identification document number."
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "Address": {
+        "type": "object",
+        "description": "Payee address information.",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Payee full address."
+          },
+          "state_province": {
+            "type": "string",
+            "description": "Payee state/province."
+          },
+          "city": {
+            "type": "string",
+            "description": "Payee city."
+          },
+          "post_code": {
+            "type": "string",
+            "description": "Payee postal code."
+          }
+        }
+      },
+      "AccountData": {
+        "type": "object",
+        "description": "Payee account information.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "MOBILE_WALLET"
+            ]
+          },
+          "account_id": {
+            "type": "string",
+            "description": "Mobile wallet identifier (e.g. phone number, email)."
+          }
+        },
+        "required": [
+          "type",
+          "account_id"
+        ]
+      },
+      "PayoutState": {
+        "type": "object",
+        "description": "Status of the payout. If the Partner implementation:\n* Can process the payout immediately (**Synchronous**),\n  the response must be `CONFIRMED`.\n* Cannot process the payout request immediately (**Asynchronous**),\n  the response must be `PENDING`. Indicating the Partner acknowledges the request\n  and the processing will happen asynchronously.",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "CONFIRMED"
+            ]
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "PayoutCallbackState": {
+        "type": "object",
+        "description": "Status of the payout. The value must be one of the following:\n* `CONFIRMED`: if the Partner processed the payout.\n* `REJECTED`: if the Partner rejected the payout.",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "CONFIRMED",
+              "REJECTED"
+            ]
+          },
+          "detail": {
+            "$ref": "#/components/schemas/PayoutCallbackStateDetail"
+          }
+        },
+        "required": "value"
+      },
+      "PayoutCallbackStateDetail": {
+        "enum": [
+          "VALIDATION_ERROR",
+          "INVALID_PAYMENT_DETAILS_ERROR",
+          "INSUFFICIENT_BALANCE",
+          "INACTIVE_ACCOUNT_ERROR",
+          "PAYMENT_PSP_HARD_DECLINE_ERROR",
+          "PAYMENT_FRAUD_ERROR",
+          "PAYMENT_ERROR",
+          "BANK_HARD_ERROR",
+          "MERCHANT_REJECTED",
+          "PAYMENT_PSP_ERROR"
+        ],
+        "description": "* `VALIDATION_ERROR`: The payout request is invalid.\n* `INVALID_PAYMENT_DETAILS_ERROR`: The payee payment details are invalid.\n* `INSUFFICIENT_BALANCE`: The payee account does not have enough funds to cover the payout.\n* `INACTIVE_ACCOUNT_ERROR` - The payee account is not active.\n* `PAYMENT_PSP_HARD_DECLINE_ERROR` - This error indicates a hard failure on the PSP side. It should not be retried.\n* `PAYMENT_FRAUD_ERROR` - Generic error for fraud related issues.\n* `BANK_HARD_ERROR` - The payout failed and it should not be retried. The payee should check with their bank to find out why.\n* `MERCHANT_REJECTED` - The Partner refuses to process the payout.\n* `PAYMENT_PSP_ERROR` - The Partner is currently not able to process the payout. The payout should be retried.\n* `PAYMENT_ERROR` - Generic payment error. This error should only be utilized if there is no other more specific error to use."
+      },
+      "PayoutBadRequestErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `VALIDATION_ERROR`: The payout request is invalid.\n* `INVALID_PAYMENT_DETAILS_ERROR`: The payee payment details are invalid.\n* `INSUFFICIENT_BALANCE`: The payee account does not have enough funds to cover the payout.",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "INVALID_PAYMENT_DETAILS_ERROR",
+                  "INSUFFICIENT_BALANCE"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "PayoutConflictErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `DUPLICATE_REQUEST_ERROR`: The payout request is duplicated.",
+                "enum": [
+                  "DUPLICATE_REQUEST_ERROR"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      },
+      "PayoutUnprocessableEntityErrorResponse": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "detail": {
+                "type": "string",
+                "description": "* `INACTIVE_ACCOUNT_ERROR` - The payee account is not active.\n* `PAYMENT_PSP_HARD_DECLINE_ERROR` - This error indicates a hard failure on the PSP side. It should not be retried.\n* `PAYMENT_FRAUD_ERROR` - Generic error for fraud related issues.\n* `BANK_HARD_ERROR` - The payout failed and it should not be retried. The payee should check with their bank to find out why.\n* `MERCHANT_REJECTED` - The partner refuses to process the payout.\n* `PAYMENT_NETWORK_ERROR` - Generic network error.\n* `PAYMENT_PSP_ERROR` - The partner is currently not able to process the payout. The payout should be retried.\n* `PAYMENT_ERROR` - Generic payment error. This error should only be utilized if there is no other more specific error to use.",
+                "enum": [
+                  "INACTIVE_ACCOUNT_ERROR",
+                  "PAYMENT_PSP_HARD_DECLINE_ERROR",
+                  "PAYMENT_FRAUD_ERROR",
+                  "BANK_HARD_ERROR",
+                  "MERCHANT_REJECTED",
+                  "PAYMENT_NETWORK_ERROR",
+                  "PAYMENT_PSP_ERROR",
+                  "PAYMENT_ERROR"
+                ]
+              },
+              "error_description": {
+                "$ref": "#/components/schemas/ErrorDescription"
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          }
+        ]
+      }
+    },
+    "securitySchemes": {
+      "partner-oauth2": {
+        "type": "oauth2",
+        "description": "OAuth2 authentication provided by PSP Partner by implementing [Partner OAuth2 API](#tag/Partner-OAuth2-API) endpoints.\n\n*Uber Pay* uses this authentication mechanism when calling [Partner Payment API](#tag/Partner-Payment-API) endpoints for the partner who supports OAuth2.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "/authorize",
+            "tokenUrl": "/token",
+            "scopes": {
+              "charge": "Grant access to `charge` endpoint",
+              "offline_access": "Grant `offline_access` as described in https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess",
+              "get_balance": "Grant access to `get_balance` endpoint",
+              "refund": "Grant access to `refund` endpoint"
+            }
+          }
+        }
+      },
+      "uberpay-http-signature-auth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Signature",
+        "description": "RSA signature of `request-target`, `Date` and `Digest` headers calculated as per\n[Draft Cavage HTTP Signatures. Section 4.1.1](https://tools.ietf.org/html/draft-cavage-http-signatures-11#section-4.1.1),\nand send as `Signature` HTTP request header."
+      },
+      "uber-oauth2": {
+        "type": "oauth2",
+        "description": "To call the **Uber Pay Callback Endpoints**, you need a valid access token from our OAuth service.\nYou can get this token by sending a request to https://login.uber.com/oauth/v2/token.\nKeep this access token for any future requests. This token is only temporary,\nso you will need to refresh it once it has expired. Do keep in mind that the validity period\nis 30 days; avoid sending excessively many requests.\n\nAdditionally, we require you to have\naccess to the required scope on your applications page, and have the scope in\nthe oauth request payload set to the same thing.\nYou can see this demonstrated in the example below.\n\nFor more information regarding authentication through the Uber oauth2 API,\nread about it in the [OAuth API section](https://developer.uber.com/docs/riders/references/api/v2/token-post#example-request-access-token-client-credentials).\n\nExample request:\n```\ncurl -X POST \\\n  -F \"client_id=RKI7BA3ugxa01Peu-KSL7pEig76iUK6_\" \\\n  -F \"client_secret=SECRET_ID\" \\\n  -F \"grant_type=client_credentials\" \\\n  -F \"scope=payments.deposits\" \"https://login.uber.com/oauth/v2/token\"\n```\nExample response:\n```\n{\n  \"access_token\": \"JA.VUNmGAAAAAAAEgASAAAABwAIAAwAAAAAAAAAEgAAAAAAAAHQAAAAFAAAAAAADgAQAAQAAAAIAAwAAAAOAAAApAAAABwAAAAEAAAAEAAAAA_SbPThodnVCoCSaBrMH8aAAAAAdYwgqOaF5Ub9AyNiWgZLmRvjMuTW--wGos8vj4imGCCo2P2n9FyRG45j1-drRs-jcp4XEkfmNIs1hiT272gpwcikPlutUCyGjFnI_U9dIKa-O1hzZiqe2KUxwAHWnQ2kPJWvHgspAfcT8mKj8A-BE7j0gH3J5cPlQ-i7c74X8p0MAAAAaOTjFRdmMtKeJM7QJAAAAGIwZDg1ODAzLTM4YTAtNDJiMy04MDZlLTdhNGNmOGUxOTZlZQ\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 2592000,\n  \"scope\": \"payments.deposits\"\n}\n```",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://login.uber.com/oauth/v2/token",
+            "scopes": {
+              "payments.deposits": "Required scope for Uber Pay payment callback endpoints",
+              "payments.payouts": "Required scope for Uber Pay payout callback endpoints"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "contentTypeHeader": {
+        "in": "header",
+        "name": "Content-Type",
+        "description": "The Content-Type header should always be set to `application/json`.",
+        "schema": {
+          "type": "string"
+        },
+        "required": true
+      },
+      "dateHeader": {
+        "in": "header",
+        "name": "Date",
+        "description": "Date in GMT as per [RFC7231 Section 7.1.1.1](https://datatracker.ietf.org/doc/html/rfc7231#section-7.1.1.1)",
+        "schema": {
+          "type": "string"
+        },
+        "required": true
+      },
+      "digestHeader": {
+        "in": "header",
+        "name": "Digest",
+        "description": "Cryptographic hash of the request body as per RFC3230 using SHA256 algorithm. See also RFC5843.",
+        "schema": {
+          "type": "string"
+        },
+        "required": true
+      },
+      "signatureHeader": {
+        "in": "header",
+        "name": "Signature",
+        "description": "RSA signature of request-target, Date and Digest headers as per\n[Draft Cavage HTTP Signatures. Section 4.1.1](https://tools.ietf.org/html/draft-cavage-http-signatures-11#section-4.1.1).\nSee [uberpay-http-signature-auth](#section/Authentication/uberpay-http-signature-auth).",
+        "schema": {
+          "type": "string"
+        },
+        "required": true
+      },
+      "acceptLanguageHeader": {
+        "in": "header",
+        "name": "Accept-Language",
+        "description": "User-preferred language as a BCP 47 code, for example `en-GB` or `pt-BR`",
+        "schema": {
+          "type": "string"
+        },
+        "required": true
+      },
+      "idempotencyKeyHeader": {
+        "in": "header",
+        "name": "X-Idempotency-Key",
+        "description": "This header must be treated as the idempotency key. When multiple requests with the same\n`X-Idempotency-Key` header occur, the partner implementation MUST only fulfil one of the\nrequests. If the request succeeds or results in a non-retryable error (e.g. 400),\nall subsequent retries should return the same response. If the request results in a\nretryable error (e.g. 500), the next request should be processed normally.",
+        "schema": {
+          "$ref": "#/components/schemas/IdempotencyKey"
+        },
+        "required": true
+      }
+    },
+    "callbacks": {
+      "confirmDeposit": {
+        "https://api.uber.com/v1/payments/deposits/{$request.body#/id}/confirm": {
+          "post": {
+            "deprecated": true,
+            "summary": "Confirm transaction",
+            "description": "Callback to confirm a `PENDING` transaction. Should be called only once.\n\nThis Uber Pay callback endpoint is needed when Partner cannot immediately process\nan earlier [/charge](#operation/charge) call. Allows Partner to finalize transaction status\nat Uber Pay end asynchronously.\n\nPartners can pass transaction reference id in `merchant_reference` if it wasn't returned in the [/charge](#operation/charge) API\nor if they want to update the existing transaction reference id.",
+            "parameters": [
+              {
+                "$ref": "#/components/parameters/idempotencyKeyHeader"
+              }
+            ],
+            "requestBody": {
+              "required": false,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "merchant_reference": {
+                        "type": "string",
+                        "description": "Transaction reference id in Partner’s system."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "Transaction confirmed successfuly",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "deposit": {
+                          "$ref": "#/components/schemas/Deposit"
+                        }
+                      },
+                      "required": [
+                        "deposit"
+                      ]
+                    }
+                  }
+                }
+              },
+              "400": {
+                "description": "Invalid transaction id"
+              },
+              "403": {
+                "description": "Unauthorized transaction"
+              },
+              "404": {
+                "description": "Transaction not found"
+              },
+              "409": {
+                "description": "Cancelled transaction"
+              }
+            },
+            "security": [
+              {
+                "uber-oauth2": [
+                  "payments.deposits"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "cancelDeposit": {
+        "https://api.uber.com/v1/payments/deposits/{$request.body#/id}/cancel": {
+          "post": {
+            "deprecated": true,
+            "summary": "Cancel transaction",
+            "description": "Callback to reject a `PENDING` transaction. Should be called only once.\n\nThis Uber Pay callback endpoint is needed when Partner cannot immediately process\nan earlier [/charge](#operation/charge) call. Allows Partner to reject transaction status\nat Uber Pay end asynchronously.\n\nPartners can pass transaction reference id in `merchant_reference` if it wasn't returned in the [/charge](#operation/charge) API\nor if they want to update the existing transaction reference id.",
+            "parameters": [
+              {
+                "$ref": "#/components/parameters/idempotencyKeyHeader"
+              }
+            ],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "cancel_reason": {
+                        "$ref": "#/components/schemas/StateReasonCode"
+                      },
+                      "merchant_reference": {
+                        "type": "string",
+                        "description": "Transaction reference id in Partner’s system."
+                      }
+                    },
+                    "required": [
+                      "cancel_reason"
+                    ]
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "Deposit canceled successfuly",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "deposit": {
+                          "$ref": "#/components/schemas/Deposit"
+                        }
+                      },
+                      "required": [
+                        "deposit"
+                      ]
+                    }
+                  }
+                }
+              },
+              "400": {
+                "description": "Invalid deposit id"
+              },
+              "403": {
+                "description": "Unauthorized deposit"
+              },
+              "404": {
+                "description": "Deposit not found"
+              },
+              "409": {
+                "description": "Confirmed deposit"
+              }
+            },
+            "security": [
+              {
+                "uber-oauth2": [
+                  "payments.deposits"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "updateDeposit": {
+        "https://api.uber.com/v1/payments/deposits/{$request.body#/id}": {
+          "post": {
+            "deprecated": true,
+            "summary": "Update transaction",
+            "description": "Update a `PENDING` transaction before confirming or cancelling it.\n\nThis Uber Pay callback endpoint allows Partner to pass transaction reference id and update\ntransaction amount in some cases.",
+            "parameters": [
+              {
+                "$ref": "#/components/parameters/idempotencyKeyHeader"
+              }
+            ],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "merchant_reference": {
+                        "type": "string",
+                        "description": "Transaction reference id in Partner’s system."
+                      },
+                      "amount": {
+                        "$ref": "#/components/schemas/CurrencyAmount"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "metadata": {
+                        "description": "Additional metadata about the transaction. String key-value pairs.",
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "deprecated": true
+                      }
+                    },
+                    "required": [
+                      "merchant_reference"
+                    ]
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "Deposit updated successfuly",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "deposit": {
+                          "$ref": "#/components/schemas/Deposit"
+                        }
+                      },
+                      "required": [
+                        "deposit"
+                      ]
+                    }
+                  }
+                }
+              },
+              "400": {
+                "description": "Invalid deposit id"
+              },
+              "403": {
+                "description": "Unauthorized deposit"
+              },
+              "404": {
+                "description": "Deposit not found"
+              },
+              "409": {
+                "description": "Conflict"
+              }
+            },
+            "security": [
+              {
+                "uber-oauth2": [
+                  "payments.deposits"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "updateRefund": {
+        "https://api.uber.com/v1/payments/refunds/{$request.body#/id}": {
+          "post": {
+            "summary": "Update refund",
+            "description": "Update the refund by using this callback. Should be called only once.\n\nIn some cases it’s possible to update refund status from `CONFIRMED` to `REJECTED`,\nfor example if the user’s bank account is no longer valid.\n\n`REJECTED` is the terminal state and can’t be changed.",
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "description": "* `CONFIRMED`: refund confirmed\n* `REJECTED`: refund rejected",
+                        "enum": [
+                          "CONFIRMED",
+                          "REJECTED"
+                        ]
+                      },
+                      "merchant_reference": {
+                        "type": "string",
+                        "description": "Refund reference id in Partner’s system.\nAllows updating previously set `merchant_reference` when needed."
+                      },
+                      "failed_reason": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "description": "Human readable failure reason. Set only when `status` is `REJECTED`."
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "Updated successfuly"
+              },
+              "400": {
+                "description": "Bad request"
+              },
+              "401": {
+                "description": "Not authenticated"
+              },
+              "403": {
+                "description": "Forbidden"
+              },
+              "404": {
+                "description": "Not found"
+              },
+              "409": {
+                "description": "Conflict"
+              },
+              "429": {
+                "description": "Rate limited"
+              },
+              "500": {
+                "description": "Uber server error"
+              }
+            },
+            "security": [
+              {
+                "uber-oauth2": [
+                  "payments.deposits"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "chargeCallback": {
+        "https://api.uber.com/v1/payments/charges/{$request.body#/id}": {
+          "post": {
+            "summary": "Finalize charge",
+            "description": "Callback to finalize a `PENDING` transaction by confirming or rejecting it. Should be called only once.\nThis endpoint is needed when PSP Partner cannot immediately process\nan earlier [/charge](#operation/charge) call.\n\n**Sandbox Endpoint:**\n- `https://sandbox-api.uber.com/v1/payments/charges/{$request.body#/id}`\n\nPartner must pass transaction reference id in `psp_reference` if it wasn't returned in the [/charge](#operation/charge) API\nor if want to update the existing transaction reference id.\nIt is allowed to omit `psp_reference` only if partner rejects transaction.\n\nPartner must indicate the reason in `state.detail` when rejects transaction.",
+            "parameters": [
+              {
+                "$ref": "#/components/parameters/idempotencyKeyHeader"
+              }
+            ],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "$ref": "#/components/schemas/ChargeCallbackState"
+                      },
+                      "psp_reference": {
+                        "type": "string",
+                        "description": "Transaction reference id in Partner’s system."
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "psp_reference"
+                    ]
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "Payout was finalized successfuly"
+              },
+              "400": {
+                "description": "Bad request"
+              },
+              "401": {
+                "description": "Not authenticated"
+              },
+              "403": {
+                "description": "Forbidden"
+              },
+              "404": {
+                "description": "Not found"
+              },
+              "409": {
+                "description": "Conflict"
+              },
+              "429": {
+                "description": "Rate limited"
+              },
+              "500": {
+                "description": "Uber server error"
+              }
+            },
+            "security": [
+              {
+                "uber-oauth2": [
+                  "payments.deposits"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "payoutCallback": {
+        "https://api.uber.com/v1/payments/payouts/{$request.body#/id}": {
+          "post": {
+            "summary": "Finalize payout",
+            "description": "Callback to finalize a payout in `PENDING` state by either confirming or rejecting it. Should be called only once.\nThis endpoint is required when the Partner cannot immediately process an earlier [/payout](#operation/payout) call.\n\nIn rejected case, the Partner must indicate the reason under `state.detail`",
+            "parameters": [
+              {
+                "$ref": "#/components/parameters/idempotencyKeyHeader"
+              }
+            ],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "$ref": "#/components/schemas/PayoutCallbackState"
+                      },
+                      "psp_reference": {
+                        "type": "string",
+                        "description": "Transaction reference id in Partner’s system."
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "psp_reference"
+                    ]
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "Finalized successfuly"
+              },
+              "400": {
+                "description": "Bad request"
+              },
+              "401": {
+                "description": "Not authenticated"
+              },
+              "403": {
+                "description": "Forbidden"
+              },
+              "404": {
+                "description": "Not found"
+              },
+              "409": {
+                "description": "Conflict"
+              },
+              "429": {
+                "description": "Rate limited"
+              },
+              "500": {
+                "description": "Uber server error"
+              }
+            },
+            "security": [
+              {
+                "uber-oauth2": [
+                  "payments.payouts"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "responses": {
+      "OAuth2ClientErrorResponse": {
+        "description": "Client Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OAuth2Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

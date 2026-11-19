@@ -1,0 +1,15 @@
+{
+  "scope": "local reference profile only; not Uber production approval",
+  "entries": [
+    {"id":"payout-required-array","pointer":"/components/schemas/PayoutCallbackState/required","kind":"schema syntax","before":"value","after":["value"],"reason":"OpenAPI required must be an array; preserves the declared field."},
+    {"id":"path-required-location","pointers":["/paths/~1charge~1{id}~1capture/post/parameters","/paths/~1charge~1{id}~1cancel/post/parameters"],"kind":"schema syntax","reason":"Move required:true from path parameter schema to parameter. No request field added."},
+    {"id":"token-response-overlap","kind":"validation dispatch","reason":"RefreshTokenResponse and WalletGrantRefreshTokenResponse overlap structurally, so validate token responses by the request grant type. Do not alter upstream oneOf."},
+    {"id":"account-name-required","kind":"upstream inconsistency","reason":"Account requires name but omits it from properties. Honor required and include synthetic name in fixtures; additional properties remain allowed."},
+    {"id":"refund-status","kind":"semantic launch gate","reason":"Use declared CONFIRMED/PENDING/REJECTED, not contradictory SUCCEEDED/FAILED examples."},
+    {"id":"lookup-status","kind":"semantic launch gate","reason":"Use declared enum, not example SUCCEEDED. CANCELLED lookup returns declared400/empty in local profile until owner confirms mapping."},
+    {"id":"payout-rejection","kind":"semantic launch gate","reason":"Initial rejection uses declared400 with detail; never emit initial REJECTED outside enum. Async rejection uses payoutCallback."},
+    {"id":"partial-capture","kind":"semantic launch gate","reason":"Only full capture enabled; partial amount returns declared400 VALIDATION_ERROR until semantics agreed."},
+    {"id":"callback-routing","kind":"semantic launch gate","reason":"All six callback builders tested; demo charge/refund/payout use corresponding modern callback. Legacy deposit callbacks are explicit client/test functions, not automatic charge routing."}
+  ],
+  "approved_for_live": false
+}

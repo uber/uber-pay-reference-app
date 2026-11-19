@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+BASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VERSION=3.9.11
+MAVEN="$BASE/.mvn/apache-maven-$VERSION"
+if [ -n "${MAVEN_HOME:-}" ]; then MAVEN="$MAVEN_HOME"; fi
+if [ ! -x "$MAVEN/bin/mvn" ]; then
+  ARCHIVE="$BASE/.mvn/maven.tar.gz"
+  URL="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$VERSION/apache-maven-$VERSION-bin.tar.gz"
+  curl --fail --silent --show-error --location "$URL" -o "$ARCHIVE"
+  EXPECTED=$(curl --fail --silent --show-error --location "$URL.sha512" | awk '{print $1}')
+  ACTUAL=$(shasum -a 512 "$ARCHIVE" | awk '{print $1}')
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo 'Maven checksum mismatch' >&2; exit 1; }
+  tar -xzf "$ARCHIVE" -C "$BASE/.mvn"
+fi
+exec "$MAVEN/bin/mvn" --settings "$BASE/.mvn/settings.xml" --file "$BASE/pom.xml" "$@"

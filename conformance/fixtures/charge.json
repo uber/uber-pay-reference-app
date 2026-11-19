@@ -1,0 +1,13 @@
+{
+  "authorization": {"type": "web_view_authorization"},
+  "id": "$id",
+  "source": {"type": "Account", "id": "demo-settlement", "owner_id": "demo-partner", "name": "Synthetic settlement"},
+  "destination": {"type": "Account", "id": "demo-customer", "name": "Synthetic customer"},
+  "amount": {"value": 1000000, "currency": "BRL"},
+  "description": "Synthetic conformance payment",
+  "country_iso2": "BR",
+  "funding_method": "DEMO_SYNC",
+  "initiated_at": "$now",
+  "return_url": "http://127.0.0.1:9090/return",
+  "capture_method": "AUTOMATIC"
+}

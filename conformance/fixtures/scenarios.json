@@ -1,0 +1,25 @@
+[
+  {
+    "name": "automatic_charge_and_lookup",
+    "steps": [
+      {"method":"POST","path":"/charge","fixture":"charge","set":{"id":"${id}"},"expect":{"status":200,"body":{"state.value":"CONFIRMED"}},"bind":{"psp":"psp_reference"}},
+      {"method":"GET","path":"/find-transaction?id=${id}","contract_path":"/find-transaction","expect":{"status":200,"body":{"id":"${id}","merchant_reference":"${psp}","status":"CONFIRMED"}}}
+    ]
+  },
+  {
+    "name":"manual_authorize_capture",
+    "steps":[
+      {"method":"POST","path":"/charge","fixture":"charge","set":{"id":"${id}","capture_method":"MANUAL"},"expect":{"status":200,"body":{"state.value":"CONFIRMED"}}},
+      {"method":"GET","path":"/find-transaction?id=${id}","contract_path":"/find-transaction","expect":{"status":200,"body":{"status":"AUTHORIZED"}}},
+      {"method":"POST","path":"/charge/${id}/capture","contract_path":"/charge/{id}/capture","payload":{"amount_to_capture":{"value":1000000,"currency":"BRL"}},"expect":{"status":200}},
+      {"method":"GET","path":"/find-transaction?id=${id}","contract_path":"/find-transaction","expect":{"status":200,"body":{"status":"CONFIRMED"}}}
+    ]
+  },
+  {
+    "name":"pending_charge_with_callback_retry",
+    "callback_faults":{"chargeCallback":[503]},
+    "steps":[
+      {"method":"POST","path":"/charge","fixture":"charge","set":{"id":"${id}","funding_method":"DEMO_PENDING"},"expect":{"status":200,"body":{"state.value":"PENDING"}},"callback":{"name":"chargeCallback","id":"${id}","body":{"state.value":"CONFIRMED"}}}
+    ]
+  }
+]
