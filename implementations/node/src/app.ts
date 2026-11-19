@@ -15,6 +15,8 @@ function send(res: Response, result: Result): void {
   else res.end();
 }
 function oneQuery(req: Request): Json {
+  const query = req.originalUrl.split('?', 2)[1] ?? '';
+  try { decodeURIComponent(query.replace(/\+/g, ' ')); } catch { throw new Failure(400); }
   const params = new URL(req.originalUrl, 'http://localhost').searchParams;
   const out: Json = {};
   for (const [key, value] of params) {
@@ -24,7 +26,7 @@ function oneQuery(req: Request): Json {
   return out;
 }
 
-export function createApp(config: Config, store: Store, contract = new Contract(config.root, config.contractFile)) {
+export function createApp(config: Config, store: Store, contract = new Contract(config.root, config.contractFile, config.strictAccountName)) {
   const service = new Service(config, store, contract);
   const app = express();
   app.disable('x-powered-by');
@@ -43,14 +45,24 @@ export function createApp(config: Config, store: Store, contract = new Contract(
   });
 
   app.get(config.basePath + '/authorize', async (req, res) => {
+    let query: Json;
     try {
-      const { consent, csrf } = await service.authorize(oneQuery(req));
+      query = oneQuery(req);
+      if (query.client_id !== config.clientId || !config.allowedRedirects.includes(query.redirect_uri)) throw new Failure(400);
+      const { consent, csrf } = await service.authorize(query);
       res.type('html').send(`<!doctype html><html><head><title>Local demo wallet consent</title></head><body>
 <h1>Local synthetic wallet</h1><p>No real account or money is used.</p>
 <form method="post" action="/demo/consent"><input type="hidden" name="consent_token" value="${html(consent)}">
 <input type="hidden" name="csrf" value="${html(csrf)}"><button name="decision" value="approve">Approve</button>
 <button name="decision" value="deny">Deny</button></form></body></html>`);
-    } catch { res.status(400).send('Invalid authorization request'); }
+    } catch (error) {
+      if (query?.client_id === config.clientId && config.allowedRedirects.includes(query.redirect_uri) && (error instanceof Failure || error instanceof SyntaxError || error instanceof ContractError)) {
+        const target = new URL(query.redirect_uri);
+        target.searchParams.set('error', error instanceof Failure && error.detail === 'invalid_scope' ? 'invalid_scope' : 'invalid_request');
+        if (typeof query.state === 'string') target.searchParams.set('state', query.state);
+        res.redirect(302, target.toString());
+      } else res.status(error instanceof Failure ? 400 : 500).send('Authorization request failed');
+    }
   });
   app.post('/demo/consent', async (req, res) => {
     try {
@@ -59,7 +71,7 @@ export function createApp(config: Config, store: Store, contract = new Contract(
       res.redirect(302, url);
     } catch { res.status(400).send('Invalid or expired consent'); }
   });
-  app.get('/demo/pay', async (req, res) => {
+  app.get(['/demo/pay', '/demo/action'], async (req, res) => {
     try {
       const token = oneQuery(req).token;
       const job = (await store.pool.query(
@@ -78,7 +90,7 @@ export function createApp(config: Config, store: Store, contract = new Contract(
   app.post('/demo/complete', async (req, res) => {
     try {
       const form = new URLSearchParams(req.body.toString());
-      await store.transaction(async db => {
+      const returnUrl = await store.transaction(async db => {
         const job = (await db.query(
           `SELECT * FROM jobs WHERE client_id=$1 AND status='WAITING' AND payload::jsonb->>'payment_token'=$2`,
           [config.clientId, form.get('payment_token')],
@@ -88,9 +100,12 @@ export function createApp(config: Config, store: Store, contract = new Contract(
         if (Number(payload.expires_at) <= Date.now()) throw new Failure(400);
         if (!safeEqual(payload.csrf, form.get('csrf') ?? '')) throw new Failure(400);
         payload.state = form.get('decision') === 'approve' ? 'CONFIRMED' : 'REJECTED';
+        payload.detail = 'USER_CANCELLED';
         await db.query(`UPDATE jobs SET payload=$2,status='PENDING',next_attempt_at=now() WHERE id=$1`, [job.id, encode(payload)]);
+        return payload.return_url;
       });
-      res.status(200).send('Local payment completion scheduled');
+      if (config.allowedRedirects.includes(returnUrl)) res.redirect(302, returnUrl);
+      else res.status(200).send('Local payment completion scheduled');
     } catch { res.status(400).send('Invalid payment completion'); }
   });
 
@@ -161,8 +176,16 @@ export function createApp(config: Config, store: Store, contract = new Contract(
       const moneyAuth = ['charge', 'capture', 'cancel', 'initRefund'].includes(op.operationId);
       const bearerNeeded = op.operationId === 'getBalance' || (moneyAuth && (config.oauthRequired ||
         body.authorization?.type === 'access_token_authorization' || !!req.get('authorization')));
-      if (bearerNeeded) await service.bearer(req.get('authorization'), scope,
-        op.operationId === 'getBalance' ? body.account_id : body.authorization?.account_id);
+      if (bearerNeeded) {
+        let account = op.operationId === 'getBalance' ? body.account_id : body.authorization?.account_id;
+        const resourceId = ['capture', 'cancel'].includes(op.operationId)
+          ? decodeURIComponent(req.path.split('/').at(-2)!)
+          : op.operationId === 'initRefund' ? body.original_transaction_id : undefined;
+        if (resourceId) account = (await store.pool.query(
+          `SELECT account_id FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2`,
+          [config.clientId, resourceId])).rows[0]?.account_id;
+        await service.bearer(req.get('authorization'), scope, account);
+      }
       const result = await service.execute(op, req.path, body, req.get('x-idempotency-key'));
       send(res, result);
     } catch (error) {

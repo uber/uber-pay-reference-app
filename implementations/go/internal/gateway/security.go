@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+ "strconv"
 	"strings"
 	"time"
 )
@@ -53,15 +54,23 @@ func VerifySignature(r *http.Request, raw []byte, keys map[string]*rsa.PublicKey
 		}
 		parts[m[1]] = m[2]
 	}
-	if len(parts) != 4 || parts["algorithm"] != "rsa-sha256" || parts["headers"] != "(request-target) host date digest" {
+	for name:=range parts { if name!="keyId" && name!="algorithm" && name!="headers" && name!="signature" && name!="created" && name!="expires" { return errors.New("unknown signature parameter") } }
+ if len(parts)<4 || parts["algorithm"] != "rsa-sha256" || parts["headers"] != "(request-target) host date digest" {
 		return errors.New("unsupported signature parameters")
 	}
-	key := keys[parts["keyId"]]
+ for _,field:=range []string{"created","expires"} { if value,ok:=parts[field];ok {
+  if len(value)>12 || !regexp.MustCompile(`^[0-9]+$`).MatchString(value) {return errors.New("invalid signature time")}
+  seconds,err:=strconv.ParseInt(value,10,64);if err!=nil {return err}
+  when:=time.Unix(seconds,0)
+  if field=="created" && (now.Sub(when)>maxSkew || when.Sub(now)>maxSkew) || field=="expires" && now.After(when) {return errors.New("signature time outside window")}
+ }}
+ if parts["created"]!="" && parts["expires"]!="" {c,_:=strconv.ParseInt(parts["created"],10,64);e,_:=strconv.ParseInt(parts["expires"],10,64);if e<c {return errors.New("invalid signature interval")}}
+ key := keys[parts["keyId"]]
 	if key == nil {
 		return errors.New("unknown signing key")
 	}
 	date, err := http.ParseTime(r.Header.Get("Date"))
-	if err != nil || now.Sub(date) > maxSkew || date.Sub(now) > maxSkew {
+	if err != nil || date.UTC().Format(http.TimeFormat) != r.Header.Get("Date") || now.Sub(date) > maxSkew || date.Sub(now) > maxSkew {
 		return errors.New("signature outside freshness window")
 	}
 	digest := sha256.Sum256(raw)

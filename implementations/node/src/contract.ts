@@ -6,8 +6,9 @@ export class ContractError extends Error {}
 
 export class Contract {
   readonly spec: Json;
-  constructor(root: string, file = 'contracts/runtime.json') {
+  constructor(root: string, file = 'contracts/runtime.json', strictAccountName = false) {
     this.spec = decode(readFileSync(resolve(root, file)));
+    if (strictAccountName) this.spec.components.schemas.Account.required.push('name');
     // A recorded syntax-only erratum. Do not change upstream semantic enums.
     const required = this.spec.components.schemas.PayoutCallbackState.required;
     if (typeof required === 'string') this.spec.components.schemas.PayoutCallbackState.required = [required];
@@ -58,7 +59,7 @@ export class Contract {
         if (schema.minLength !== undefined && BigInt([...value].length) < exactInteger(schema.minLength)) fail('too short');
         if (schema.maxLength !== undefined && BigInt([...value].length) > exactInteger(schema.maxLength)) fail('too long');
         if (schema.pattern && !new RegExp(schema.pattern).test(value)) fail('pattern mismatch');
-        if (schema.format === 'date-time' && (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(Date.parse(value)))) fail('invalid timestamp');
+        if (schema.format === 'date-time' && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value)))) fail('invalid timestamp');
         if (schema.format === 'uri') {
           try { new URL(value); } catch { fail('invalid URI'); }
         }
@@ -88,6 +89,7 @@ export class Contract {
 
   response(operation: Json, status: number, value?: Json, grant?: string): void {
     const response = operation.responses?.[String(status)];
+    if (!response && status >= 500 && status <= 599 && value === undefined) return;
     if (!response) throw new ContractError('Response status not declared by operation');
     let schema = this.dereference(response).content?.['application/json']?.schema;
     if (grant && status === 200 && operation.operationId === 'createToken') {

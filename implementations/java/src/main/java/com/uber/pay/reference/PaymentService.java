@@ -71,8 +71,8 @@ final class PaymentService {
                 return error(
                     template,
                     new ApiError(
-                        400,
-                        "VALIDATION_ERROR",
+                        template.equals("/payout") ? 409 : 400,
+                        template.equals("/payout") ? "DUPLICATE_REQUEST_ERROR" : "VALIDATION_ERROR",
                         "Idempotency key reused with a different request"));
               return Reply.replay(old);
             }
@@ -123,6 +123,7 @@ final class PaymentService {
             .op(template, template.equals("/find-transaction") ? "get" : "post")
             .path("responses")
             .path("" + status);
+    if (status >= 500 && schema.isMissingNode()) return Reply.empty(500);
     if (schema.isMissingNode()) status = 400;
     if (Set.of("/charge/{id}/capture", "/charge/{id}/cancel", "/payout").contains(template)) {
       String detail = e.code;
@@ -222,7 +223,10 @@ final class PaymentService {
     var old = transaction(c, kind, id);
     if (old != null) {
       if (!Database.str(old, "request_hash").equals(hash))
-        throw new ApiError(400, "VALIDATION_ERROR", "Transaction ID reused");
+        throw new ApiError(
+            kind.equals("payout") ? 409 : 400,
+            kind.equals("payout") ? "DUPLICATE_REQUEST_ERROR" : "VALIDATION_ERROR",
+            "Transaction ID reused");
       return new Reply(
           ((Number) old.get("response_status")).intValue(),
           Database.str(old, "response_body"),
@@ -238,6 +242,34 @@ final class PaymentService {
                     .equals("access_token_authorization")
             ? b.path("authorization").path("account_id").asText()
             : "demo-account";
+    if (kind.equals("payout")) {
+      String payee = b.path("payee").path("account").path("account_id").asText();
+      Map<String, String> declines =
+          Map.of(
+              "inactive-account",
+              "INACTIVE_ACCOUNT_ERROR",
+              "fraud-account",
+              "PAYMENT_FRAUD_ERROR",
+              "hard-decline-account",
+              "PAYMENT_PSP_HARD_DECLINE_ERROR",
+              "bank-hard-account",
+              "BANK_HARD_ERROR",
+              "merchant-rejected-account",
+              "MERCHANT_REJECTED",
+              "network-error-account",
+              "PAYMENT_NETWORK_ERROR",
+              "psp-error-account",
+              "PAYMENT_PSP_ERROR",
+              "payment-error-account",
+              "PAYMENT_ERROR");
+      if (payee.equals("invalid-account")
+          || b.path("payee").path("document").path("id").asText().equals("invalid"))
+        throw new ApiError(400, "INVALID_PAYMENT_DETAILS_ERROR", "Invalid synthetic wallet");
+      if (declines.containsKey(payee))
+        return Reply.json(422, Json.obj("detail", declines.get(payee)));
+      account(c, payee, cur);
+      acc = b.path("payer").path("id").asText();
+    }
     var a = account(c, acc, cur);
     String funding = Json.text(b, "funding_method"),
         method = kind.equals("charge") ? Json.text(b, "capture_method") : "AUTOMATIC";
@@ -245,17 +277,27 @@ final class PaymentService {
         kind.equals("charge")
             ? adapter.charge(
                 new PspAdapter.ChargeCommand(
-                    funding, method, n, Database.number(a, "available_e5")),
+                    funding, method, n, Database.number(a, "available_e5"), b),
                 providerKey("charge", id))
             : adapter.payout(
-                new PspAdapter.PayoutCommand(funding, n, Database.number(a, "available_e5")),
+                new PspAdapter.PayoutCommand(funding, n, Database.number(a, "available_e5"), b),
                 providerKey("payout", id));
     String state = decision.state(),
         internal = state.equals("CONFIRMED") && method.equals("MANUAL") ? "AUTHORIZED" : state;
     ObjectNode st = Json.obj("value", state);
     if (decision.detail() != null) st.put("detail", decision.detail());
     ObjectNode result = Json.obj("state", st, "psp_reference", ref(kind, id));
-    if (decision.action() && funding.equals("DEMO_WEBVIEW"))
+    String actionToken = WalletService.random(), csrf = WalletService.random();
+    ObjectNode completion =
+        Json.obj("state", funding.equals("DEMO_PENDING_REJECT") ? "REJECTED" : "CONFIRMED");
+    boolean action = kind.equals("charge") && decision.action();
+    if (action) {
+      completion.put("payment_token", actionToken);
+      completion.put("csrf", csrf);
+      completion.put("expires_at", System.currentTimeMillis() + config.actionTtlMs);
+      completion.put("return_url", Json.text(b, "return_url"));
+    }
+    if (action && funding.equals("DEMO_WEBVIEW"))
       result.set(
           "actions",
           Json.MAPPER
@@ -267,9 +309,9 @@ final class PaymentService {
                       "url",
                       config.publicBase.substring(
                               0, config.publicBase.length() - config.base.length())
-                          + "/demo/action?id="
-                          + enc(id))));
-    if (decision.action() && funding.equals("DEMO_QR"))
+                          + "/demo/action?token="
+                          + enc(actionToken))));
+    if (action && funding.equals("DEMO_QR"))
       result.set(
           "actions",
           Json.MAPPER
@@ -279,9 +321,9 @@ final class PaymentService {
                       "type",
                       "qr_code_input_action",
                       "code",
-                      "DEMO:" + id,
+                      "local-qr:" + actionToken,
                       "expiry_time_millis",
-                      System.currentTimeMillis() + 600000)));
+                      System.currentTimeMillis() + config.actionTtlMs)));
     Reply response = Reply.json(200, result);
     if (!state.equals("REJECTED")) adjust(c, acc, cur, -n, internal.equals("CONFIRMED") ? -n : 0);
     insert(
@@ -299,16 +341,31 @@ final class PaymentService {
         decision.detail(),
         hash,
         response);
+    Database.execute(
+        c,
+        "UPDATE transactions SET source_account_id=?,payee_account_id=? WHERE client_id=? AND"
+            + " kind=? AND id=?",
+        kind.equals("charge")
+            ? b.path("source").path("id").asText()
+            : b.path("payer").path("id").asText(),
+        kind.equals("payout") ? b.path("payee").path("account").path("account_id").asText() : null,
+        config.client,
+        kind,
+        id);
+    for (var item : b.path("payment_data"))
+      if (item.path("type").asText().equals("order_payment_data"))
+        Database.execute(
+            c,
+            "UPDATE transactions SET order_id=? WHERE client_id=? AND kind=? AND id=?",
+            item.path("order_id").asText(),
+            config.client,
+            kind,
+            id);
+    if (kind.equals("payout") && state.equals("CONFIRMED"))
+      adjust(c, b.path("payee").path("account").path("account_id").asText(), cur, n, n);
     if (state.equals("PENDING"))
       queue(
-          c,
-          kind,
-          id,
-          "COMPLETION",
-          "",
-          Json.obj("state", funding.equals("DEMO_PENDING_REJECT") ? "REJECTED" : "CONFIRMED"),
-          decision.action() ? "WAITING" : "PENDING",
-          config.delay);
+          c, kind, id, "COMPLETION", "", completion, action ? "WAITING" : "PENDING", config.delay);
     return response;
   }
 
@@ -360,8 +417,17 @@ final class PaymentService {
                 original,
                 Database.str(t, "currency"),
                 n,
-                b.path("amount_to_capture").path("currency").asText()),
+                b.path("amount_to_capture").path("currency").asText(),
+                Database.str(t, "funding_method")),
             providerKey("capture", id));
+    if (result.state().equals("REJECTED")) {
+      adjust(c, Database.str(t, "account_id"), Database.str(t, "currency"), original, 0);
+      setState(c, "charge", id, "REJECTED", result.detail());
+      return Reply.json(
+          422, Json.obj("detail", result.detail() == null ? "BANK_HARD_ERROR" : result.detail()));
+    }
+    if (!result.state().equals("CONFIRMED"))
+      throw new IllegalStateException("Unexpected capture decision");
     adjust(c, Database.str(t, "account_id"), Database.str(t, "currency"), 0, -n);
     setState(c, "charge", id, result.state(), result.detail());
     return Reply.empty(200);
@@ -415,7 +481,7 @@ final class PaymentService {
     if (snapshot == null) throw new ApiError(404, "not_found", "Unknown transaction");
     if (q.containsKey("merchant_reference")
         && !q.get("merchant_reference").equals(snapshot.reference()))
-      throw new ApiError(400, "VALIDATION_ERROR", "Reference mismatch");
+      throw new ApiError(404, "VALIDATION_ERROR", "Reference mismatch");
     String status = snapshot.state();
     if (status.equals("CANCELLED"))
       throw new ApiError(400, "VALIDATION_ERROR", "Cancelled lookup status is not declared");
@@ -468,7 +534,7 @@ final class PaymentService {
     String funding = Database.str(original, "funding_method");
     PspAdapter.Decision decision =
         adapter.refund(
-            new PspAdapter.RefundCommand(funding, n, remaining), providerKey("refund", id));
+            new PspAdapter.RefundCommand(funding, n, remaining, b), providerKey("refund", id));
     String state = decision.state();
     Reply response =
         Reply.json(201, Json.obj("status", state, "merchant_reference", ref("refund", id)));
@@ -489,6 +555,12 @@ final class PaymentService {
         null,
         hash,
         response);
+    Database.execute(
+        c,
+        "UPDATE transactions SET source_account_id=? WHERE client_id=? AND kind='refund' AND id=?",
+        original.get("source_account_id"),
+        config.client,
+        id);
     if (state.equals("PENDING"))
       queue(
           c,
@@ -510,7 +582,8 @@ final class PaymentService {
                 Json.text(b, "funding_method"),
                 "BRL",
                 Database.number(a, "available_e5"),
-                Database.number(a, "balance_e5")));
+                Database.number(a, "balance_e5"),
+                b));
     return Reply.json(
         200,
         Json.obj(
@@ -561,6 +634,11 @@ final class PaymentService {
   }
 
   void complete(Connection c, String kind, String id, String state) throws SQLException {
+    complete(c, kind, id, state, "MERCHANT_REJECTED");
+  }
+
+  void complete(Connection c, String kind, String id, String state, String detail)
+      throws SQLException {
     if (!Set.of("charge", "refund", "payout").contains(kind)
         || !Set.of("CONFIRMED", "REJECTED").contains(state))
       throw new ApiError(400, "VALIDATION_ERROR", "Invalid completion");
@@ -573,7 +651,9 @@ final class PaymentService {
       if (state.equals("CONFIRMED")) adjust(c, acc, cur, n, n);
     } else if (state.equals("CONFIRMED")) adjust(c, acc, cur, 0, -n);
     else adjust(c, acc, cur, n, 0);
-    setState(c, kind, id, state, state.equals("REJECTED") ? "INSUFFICIENT_BALANCE" : null);
+    if (kind.equals("payout") && state.equals("CONFIRMED"))
+      adjust(c, Database.str(t, "payee_account_id"), cur, n, n);
+    setState(c, kind, id, state, state.equals("REJECTED") ? detail : null);
     String cb =
         kind.equals("charge")
             ? "chargeCallback"
@@ -586,6 +666,8 @@ final class PaymentService {
                 Json.obj("value", state),
                 "psp_reference",
                 Database.str(t, "psp_reference"));
+    if (!kind.equals("refund") && state.equals("REJECTED"))
+      ((ObjectNode) payload.path("state")).put("detail", detail);
     if (kind.equals("refund") && state.equals("REJECTED"))
       payload.put("failed_reason", "Demo rejection");
     contracts.callback(cb, payload);

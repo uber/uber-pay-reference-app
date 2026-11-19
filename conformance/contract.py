@@ -58,6 +58,10 @@ def operation(method, path):
 
 def response(method, path, status, payload, *, grant=None):
     op = operation(method, path)
+    # Provisional transient-5xx erratum: infrastructure failures must stay retryable.
+    if 500 <= status <= 599 and str(status) not in op["responses"]:
+        assert payload is None, "Undeclared transient 5xx must have an empty body"
+        return
     assert str(status) in op["responses"], f"{method} {path}: undeclared HTTP {status}"
     item = op["responses"][str(status)]
     if "$ref" in item:

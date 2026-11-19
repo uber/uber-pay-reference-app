@@ -4,6 +4,7 @@
   <groupId>com.uber.pay</groupId><artifactId>psp-reference-java</artifactId><version>2.0.0</version>
   <properties><java.version>21</java.version><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>
   <dependencies>
+    <dependency><groupId>com.zaxxer</groupId><artifactId>HikariCP</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
     <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>42.7.14</version></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>

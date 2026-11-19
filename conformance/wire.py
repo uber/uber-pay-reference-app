@@ -4,6 +4,7 @@ import base64
 import hashlib
 import http.client
 import json
+import re
 import time
 from dataclasses import dataclass
 from email.utils import formatdate
@@ -58,6 +59,7 @@ class Client:
         self.base = urlsplit(url)
         self.prefix = self.base.path.rstrip("/")
         self.key, self.key_id, self.control_secret = key, key_id, control_secret
+        self.observed = set()
 
     def request(
         self,
@@ -72,6 +74,8 @@ class Client:
         headers=None,
         date=None,
         signature_target=None,
+        signature_parameters=None,
+        key_id_override=None,
         outside=False,
     ):
         target = path if outside else self.prefix + path
@@ -97,10 +101,12 @@ class Client:
                 text.encode(), padding.PKCS1v15(), hashes.SHA256()
             )
             values["Signature"] = (
-                f'keyId="{self.key_id}",algorithm="rsa-sha256",'
+                f'keyId="{key_id_override or self.key_id}",algorithm="rsa-sha256",'
                 'headers="(request-target) host date digest",'
                 f'signature="{base64.b64encode(signature).decode()}"'
             )
+            for name, value in (signature_parameters or {}).items():
+                values["Signature"] += f', {name}="{value}"'
         if idem is not None:
             values["X-Idempotency-Key"] = idem
         if token:
@@ -115,7 +121,15 @@ class Client:
         try:
             connection.request(method, target, body=body, headers=values)
             r = connection.getresponse()
-            return Reply(r.status, {k.lower(): v for k, v in r.getheaders()}, r.read())
+            reply = Reply(r.status, {k.lower(): v for k, v in r.getheaders()}, r.read())
+            template = re.sub(
+                r"^/charge/[^/]+/(capture|cancel)$",
+                r"/charge/{id}/\1",
+                path.split("?", 1)[0],
+            )
+            if not outside:
+                self.observed.add((method, template, r.status))
+            return reply
         finally:
             connection.close()
 

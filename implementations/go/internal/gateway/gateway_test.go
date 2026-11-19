@@ -159,7 +159,7 @@ func TestDemoAdapterStates(t *testing.T) {
 			}
 		})
 	}
-	if e := adapter.Capture(context.Background(), CaptureCommand{AmountE5: 1, AuthorizedE5: 2, Currency: "BRL", AuthorizedCurrency: "BRL"}); e == nil {
+	if _, e := adapter.Capture(context.Background(), CaptureCommand{AmountE5: 1, AuthorizedE5: 2, Currency: "BRL", AuthorizedCurrency: "BRL"}); e == nil {
 		t.Fatal("partial capture not gated")
 	}
 }

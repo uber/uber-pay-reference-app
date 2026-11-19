@@ -58,3 +58,19 @@ class ContractTest(unittest.TestCase):
 
     def test_every_callback_known(self):
         self.assertEqual(len(contract.SPEC["components"]["callbacks"]), 6)
+
+    def test_formats_are_actually_enabled(self):
+        for fmt, value in [
+            ("date-time", "yesterday"),
+            ("date-time", "2026-11-20T10:00:00"),
+            ("uri", "not a uri"),
+        ]:
+            with self.subTest(fmt=fmt, value=value), self.assertRaises(Exception):
+                contract.validate({"type": "string", "format": fmt}, value)
+
+    def test_transient_5xx_does_not_allow_undeclared_4xx(self):
+        contract.response("post", "/refund", 500, None)
+        with self.assertRaises(AssertionError):
+            contract.response("post", "/refund", 503, {"error": "unsafe detail"})
+        with self.assertRaises(AssertionError):
+            contract.response("post", "/refund", 418, None)

@@ -18,8 +18,8 @@ final class Config {
       uberSecret,
       publicBase,
       controlSecret;
-  final int port, skew, delay, interval, maxAttempts, retryMs;
-  final boolean controls, oauthRequired;
+  final int port, skew, delay, interval, maxAttempts, retryMs, actionTtlMs, refreshTtlSeconds;
+  final boolean controls, oauthRequired, strictAccountName;
   final Set<String> redirects;
   final Path contract, migration;
   final SignatureVerifier signatures;
@@ -59,6 +59,9 @@ final class Config {
     interval = num(env, "WORKER_INTERVAL_MS", 100, 10, 60000);
     maxAttempts = num(env, "CALLBACK_MAX_ATTEMPTS", 5, 1, 100);
     retryMs = num(env, "CALLBACK_RETRY_MS", 200, 1, 60000);
+    actionTtlMs = num(env, "ACTION_TTL_MS", 600000, 1, 3600000);
+    refreshTtlSeconds = num(env, "REFRESH_TOKEN_TTL_SECONDS", 2592000, 1, 31536000);
+    strictAccountName = get(env, "STRICT_ACCOUNT_NAME", "false").equals("true");
     controls = get(env, "ENABLE_TEST_CONTROL", "false").equals("true");
     controlSecret = get(env, "TEST_CONTROL_SECRET", "");
     if (controls && controlSecret.length() < 16)

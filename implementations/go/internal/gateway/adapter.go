@@ -15,32 +15,36 @@ type PspAdapter interface {
 	LookupOperation(context.Context, OperationQuery) (ProviderResult, error)
 	Charge(context.Context, PaymentCommand) (ProviderResult, error)
 	Payout(context.Context, PaymentCommand) (ProviderResult, error)
-	Capture(context.Context, CaptureCommand) error
+	Capture(context.Context, CaptureCommand) (ProviderResult, error)
 	Cancel(context.Context, string) error
 	Refund(context.Context, PaymentCommand) (ProviderResult, error)
 }
 type PaymentCommand struct {
+	Request                                                          Object
 	ID, Account, Currency, FundingMethod, CaptureMethod, ProviderKey string
 	AmountE5, AvailableE5                                            int64
 }
 type CaptureCommand struct {
-	ID, ProviderKey, Currency, AuthorizedCurrency string
-	AmountE5, AuthorizedE5                        int64
+	ID, ProviderKey, Currency, AuthorizedCurrency, FundingMethod string
+	AmountE5, AuthorizedE5                                       int64
 }
 type ProviderResult struct{ State, Detail string }
 type DemoPspAdapter struct{}
 
 func (DemoPspAdapter) Charge(_ context.Context, c PaymentCommand) (ProviderResult, error) {
+	if e := validatePaymentData(c.Request, c.AmountE5); e != nil {
+		return ProviderResult{}, e
+	}
 	if !knownFunding(c.FundingMethod) {
 		return ProviderResult{}, errors.New("unsupported demo funding method")
 	}
-	if c.CaptureMethod == "MANUAL" && c.FundingMethod != "DEMO_SYNC" && c.FundingMethod != "DEMO_REJECT" {
+	if c.CaptureMethod == "MANUAL" && c.FundingMethod != "DEMO_SYNC" && c.FundingMethod != "DEMO_REJECT" && !strings.HasPrefix(c.FundingMethod, "DEMO_CAPTURE_") {
 		return ProviderResult{}, errors.New("manual authorization must be synchronous")
 	}
 	if c.FundingMethod == "DEMO_REJECT" || c.AvailableE5 < c.AmountE5 {
 		return ProviderResult{"REJECTED", "INSUFFICIENT_BALANCE"}, nil
 	}
-	if c.FundingMethod != "DEMO_SYNC" {
+	if c.FundingMethod != "DEMO_SYNC" && !strings.HasPrefix(c.FundingMethod, "DEMO_CAPTURE_") {
 		return ProviderResult{State: "PENDING"}, nil
 	}
 	if c.CaptureMethod == "MANUAL" {
@@ -52,11 +56,18 @@ func (d DemoPspAdapter) Payout(ctx context.Context, c PaymentCommand) (ProviderR
 	c.CaptureMethod = "AUTOMATIC"
 	return d.Charge(ctx, c)
 }
-func (DemoPspAdapter) Capture(_ context.Context, c CaptureCommand) error {
+func (DemoPspAdapter) Capture(_ context.Context, c CaptureCommand) (ProviderResult, error) {
 	if c.Currency != c.AuthorizedCurrency || c.AmountE5 != c.AuthorizedE5 {
-		return errors.New("only exact full capture is available in this reference profile")
+		return ProviderResult{}, errors.New("only exact full capture is available in this reference profile")
 	}
-	return nil
+	if strings.HasPrefix(c.FundingMethod, "DEMO_CAPTURE_") {
+		detail := "BANK_HARD_ERROR"
+		if c.FundingMethod == "DEMO_CAPTURE_SOFT" {
+			detail = "BANK_SOFT_ERROR"
+		}
+		return ProviderResult{State: "REJECTED", Detail: detail}, nil
+	}
+	return ProviderResult{State: "CONFIRMED"}, nil
 }
 func (DemoPspAdapter) Cancel(context.Context, string) error { return nil }
 func (DemoPspAdapter) Refund(_ context.Context, c PaymentCommand) (ProviderResult, error) {
@@ -69,6 +80,7 @@ func (DemoPspAdapter) Refund(_ context.Context, c PaymentCommand) (ProviderResul
 // These inputs include the durable local fixture snapshot; a production port
 // would require a separate intent/reconciliation boundary before network I/O.
 type BalanceQuery struct {
+	Request                Object
 	Account, Currency      string
 	AvailableE5, BalanceE5 int64
 }
@@ -79,6 +91,9 @@ type BalanceResult struct {
 type OperationQuery struct{ ProviderKey, Reference, State string }
 
 func (DemoPspAdapter) GetBalance(_ context.Context, q BalanceQuery) (BalanceResult, error) {
+	if e := validatePaymentData(q.Request, 0); e != nil {
+		return BalanceResult{}, e
+	}
 	return BalanceResult{q.AvailableE5, q.BalanceE5, q.Currency}, nil
 }
 func (DemoPspAdapter) LookupOperation(_ context.Context, q OperationQuery) (ProviderResult, error) {

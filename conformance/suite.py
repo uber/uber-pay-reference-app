@@ -1,4 +1,4 @@
-"""Black-box scenarios; no gateway source imports and no database mutation."""
+"""Independent wire scenarios with namespace-scoped local fault fixtures; no gateway imports."""
 
 import json
 import time
@@ -10,6 +10,7 @@ from email.utils import formatdate
 from html.parser import HTMLParser
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
+from .review_suite import ReviewRegressionSuite
 from . import contract
 from .wire import eventually
 
@@ -28,7 +29,7 @@ class HiddenForm(HTMLParser):
             self.fields[attrs["name"]] = attrs.get("value", "")
 
 
-class GatewaySuite(unittest.TestCase):
+class GatewaySuite(ReviewRegressionSuite, unittest.TestCase):
     client = mock = process = None
     client_id = "demo-client"
     client_secret = "demo-secret"
@@ -187,13 +188,13 @@ class GatewaySuite(unittest.TestCase):
             idem=self.uid(),
             headers={"Digest": "SHA-256=Zm9v"},
         )
-        self.assertIn(r.status, (400, 401))
+        self.assert_response(r, "/charge", 401)
 
     def test_signature_missing(self):
         r = self.client.request(
             "POST", "/charge", self.fixture("charge"), idem=self.uid(), signed=False
         )
-        self.assertIn(r.status, (400, 401))
+        self.assert_response(r, "/charge", 401)
 
     def test_signature_malformed_is_bounded(self):
         r = self.client.request(
@@ -203,7 +204,7 @@ class GatewaySuite(unittest.TestCase):
             idem=self.uid(),
             headers={"Signature": 'keyId="unterminated'},
         )
-        self.assertIn(r.status, (400, 401))
+        self.assert_response(r, "/charge", 401)
 
     def test_signature_wrong_target(self):
         r = self.client.request(
@@ -213,7 +214,7 @@ class GatewaySuite(unittest.TestCase):
             idem=self.uid(),
             signature_target="/wrong",
         )
-        self.assertIn(r.status, (400, 401))
+        self.assert_response(r, "/charge", 401)
 
     def test_signature_expired(self):
         r = self.client.request(
@@ -223,7 +224,7 @@ class GatewaySuite(unittest.TestCase):
             idem=self.uid(),
             date=formatdate(time.time() - 1000, usegmt=True),
         )
-        self.assertIn(r.status, (400, 401))
+        self.assert_response(r, "/charge", 401)
 
     def test_signature_future(self):
         r = self.client.request(
@@ -233,7 +234,7 @@ class GatewaySuite(unittest.TestCase):
             idem=self.uid(),
             date=formatdate(time.time() + 1000, usegmt=True),
         )
-        self.assertIn(r.status, (400, 401))
+        self.assert_response(r, "/charge", 401)
 
     def test_manual_capture(self):
         data, _ = self.charge(capture_method="MANUAL")
@@ -342,24 +343,11 @@ class GatewaySuite(unittest.TestCase):
         )
 
     def test_webview_and_qr_action(self):
-        for method, typ in [
-            ("DEMO_WEBVIEW", "web_view_user_input_action"),
-            ("DEMO_QR", "qr_code_input_action"),
-        ]:
-            with self.subTest(method=method):
-                data, body = self.charge(funding_method=method)
-                self.assertEqual(body["state"]["value"], "PENDING")
-                self.assertEqual(body["actions"][0]["type"], typ)
-                self.assertFalse(self.mock.matching("chargeCallback", data["id"]))
-                self.assertEqual(
-                    self.client.control(
-                        "POST",
-                        "complete",
-                        {"id": data["id"], "kind": "charge", "state": "CONFIRMED"},
-                    ).status,
-                    200,
-                )
-                self.accepted("chargeCallback", data["id"])
+        for method in ("DEMO_WEBVIEW", "DEMO_QR"):
+            data, body = self.charge(funding_method=method)
+            self.assertEqual(body["state"]["value"], "PENDING")
+            self.submit_action(self.action_page(body))
+            self.accepted("chargeCallback", data["id"])
 
     def test_callback_retry_keeps_identity(self):
         data = self.fixture("charge", funding_method="DEMO_PENDING")
@@ -584,14 +572,39 @@ class GatewaySuite(unittest.TestCase):
             "code": redirect["code"][0],
             "redirect_uri": params["redirect_uri"],
         }
-        self.assert_response(
+        issued = self.assert_response(
             self.client.request("POST", "/token", payload),
             "/token",
             200,
             grant="authorization_code",
         )
+        refresh_request = dict(
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            grant_type="refresh_token",
+            refresh_token=issued["refresh_token"],
+        )
+        access = self.assert_response(
+            self.client.request("POST", "/token", refresh_request),
+            "/token",
+            200,
+            grant="refresh_token",
+        )["access_token"]
         self.assert_response(
             self.client.request("POST", "/token", payload), "/token", 400
+        )
+        self.assert_response(
+            self.client.request("POST", "/token", refresh_request), "/token", 400
+        )
+        self.assert_response(
+            self.client.request(
+                "POST",
+                "/balance",
+                {"account_id": "demo-account", "funding_method": "DEMO_SYNC"},
+                token=access,
+            ),
+            "/balance",
+            401,
         )
 
     def test_authorize_redirect_rejected(self):

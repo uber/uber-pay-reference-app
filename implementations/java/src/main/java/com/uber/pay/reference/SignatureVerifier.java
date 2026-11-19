@@ -43,7 +43,9 @@ final class SignatureVerifier {
       if (!m.lookingAt() || out.putIfAbsent(m.group(1), m.group(2)) != null) throw bad();
       p = m.end();
     }
-    if (!out.keySet().equals(Set.of("keyId", "algorithm", "headers", "signature"))) throw bad();
+    if (!out.keySet().containsAll(Set.of("keyId", "algorithm", "headers", "signature"))
+        || !Set.of("keyId", "algorithm", "headers", "signature", "created", "expires")
+            .containsAll(out.keySet())) throw bad();
     return out;
   }
 
@@ -59,11 +61,25 @@ final class SignatureVerifier {
               expected.getBytes(StandardCharsets.US_ASCII),
               digest.getBytes(StandardCharsets.US_ASCII))) throw bad();
       Instant when = ZonedDateTime.parse(date, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+      if (!DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'", Locale.US)
+          .withZone(ZoneOffset.UTC)
+          .format(when)
+          .equals(date)) throw bad();
       if (Math.abs(Instant.now().getEpochSecond() - when.getEpochSecond()) > skew) throw bad();
       Map<String, String> s = parse(headers.get("signature"));
       if (!s.get("algorithm").equals("rsa-sha256")
           || !s.get("headers").equals("(request-target) host date digest")
           || !keys.containsKey(s.get("keyId"))) throw bad();
+      for (String field : List.of("created", "expires"))
+        if (s.containsKey(field)) {
+          if (!s.get(field).matches("[0-9]{1,12}")) throw bad();
+          long seconds = Long.parseLong(s.get(field)), now = Instant.now().getEpochSecond();
+          if (field.equals("created") && Math.abs(now - seconds) > skew
+              || field.equals("expires") && seconds < now) throw bad();
+        }
+      if (s.containsKey("created")
+          && s.containsKey("expires")
+          && Long.parseLong(s.get("expires")) < Long.parseLong(s.get("created"))) throw bad();
       String canonical =
           "(request-target): "
               + method.toLowerCase(Locale.ROOT)

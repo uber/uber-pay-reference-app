@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS transactions (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ,
  PRIMARY KEY(client_id,kind,id), UNIQUE(client_id,kind,psp_reference)
 );
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_account_id TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payee_account_id TEXT;
 CREATE TABLE IF NOT EXISTS operations (
  client_id TEXT NOT NULL, operation_name TEXT NOT NULL, idem_key TEXT NOT NULL, fingerprint TEXT NOT NULL,
  status INTEGER NOT NULL, response_body TEXT NOT NULL, response_headers JSONB NOT NULL DEFAULT '{}',

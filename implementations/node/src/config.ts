@@ -58,6 +58,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     maxAttempts: int('CALLBACK_MAX_ATTEMPTS', '5'),
     retryMs: int('CALLBACK_RETRY_MS', '200'),
     enableControl, controlSecret,
+    actionTtlMs: int('ACTION_TTL_MS', '600000'),
+    refreshTtlSeconds: int('REFRESH_TOKEN_TTL_SECONDS', '2592000'),
+    strictAccountName: get('STRICT_ACCOUNT_NAME', 'false') === 'true',
     oauthRequired: get('OAUTH_REQUIRED', 'false') === 'true',
   };
 }

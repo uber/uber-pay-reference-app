@@ -39,7 +39,13 @@ final class Gateway {
                 400,
                 Json.obj(
                     "error",
-                    e.code.startsWith("invalid_") || e.code.equals("unsupported_grant_type")
+                    Set.of(
+                                "invalid_request",
+                                "invalid_client",
+                                "invalid_grant",
+                                "invalid_scope",
+                                "unsupported_grant_type")
+                            .contains(e.code)
                         ? e.code
                         : "invalid_request")));
       if (!template.isEmpty()) return send(payments.error(template, e));
@@ -61,8 +67,13 @@ final class Gateway {
     if (text == null || text.isEmpty()) return out;
     for (String pair : text.split("&")) {
       String[] p = pair.split("=", 2);
-      String k = URLDecoder.decode(p[0], StandardCharsets.UTF_8),
-          v = URLDecoder.decode(p.length > 1 ? p[1] : "", StandardCharsets.UTF_8);
+      String k, v;
+      try {
+        k = URLDecoder.decode(p[0], StandardCharsets.UTF_8);
+        v = URLDecoder.decode(p.length > 1 ? p[1] : "", StandardCharsets.UTF_8);
+      } catch (IllegalArgumentException e) {
+        throw new ApiError(400, "invalid_request", "Malformed percent encoding");
+      }
       if (out.putIfAbsent(k, v) != null)
         throw new ApiError(400, "invalid_request", "Duplicate parameter");
     }
@@ -91,13 +102,13 @@ final class Gateway {
     String raw = req.getRequestURI(), method = req.getMethod();
     byte[] bytes = req.getInputStream().readNBytes(1048577);
     if (bytes.length > 1048576) throw new ApiError(400, "invalid_request", "Request too large");
-    Map<String, String> query = form(req.getQueryString());
     if (raw.equals("/health") && method.equals("GET")) {
       try (Connection c = db.open()) {
         Database.query(c, "SELECT 1");
       }
       return Reply.json(200, Json.obj("status", "ok", "language", "java"));
     }
+    Map<String, String> query = form(req.getQueryString());
     if (raw.startsWith("/_test/")) return control(req, raw, method, bytes);
     if (raw.equals("/demo/consent") && method.equals("POST"))
       return wallets.consent(form(new String(bytes, StandardCharsets.UTF_8)));
@@ -171,47 +182,55 @@ final class Gateway {
   }
 
   Reply action(HttpServletRequest req, Map<String, String> q, byte[] raw) {
-    if (req.getMethod().equals("GET")) {
-      String id = q.getOrDefault("id", "");
-      String consent = WalletService.random();
-      db.atomic(
-          c -> {
-            wallets.put(c, consent, "ACTION", "demo-account", "", "", id, consent, 600);
-            return null;
-          });
-      return Reply.html(
-          "<!doctype html><html><head><title>Local demo action</title></head><body><h1>Approve fake"
-              + " payment</h1><form method='post' action='/demo/action'><input name='csrf'"
-              + " type='hidden' value='"
-              + consent
-              + "'><button name='decision' value='approve'>Approve</button><button name='decision'"
-              + " value='deny'>Reject</button></form></body></html>");
-    }
-    if (req.getMethod().equals("POST")) {
-      Map<String, String> f = form(new String(raw, StandardCharsets.UTF_8));
-      return db.atomic(
-          c -> {
-            var t =
-                Database.one(
-                    c,
-                    "SELECT * FROM tokens WHERE token_hash=? AND kind='ACTION' AND consumed=false"
-                        + " AND expires_at>now()",
-                    Json.hash(f.getOrDefault("csrf", "")));
-            if (t == null || !Set.of("approve", "deny").contains(f.getOrDefault("decision", "")))
-              throw new ApiError(400, "invalid_request", "Invalid action");
-            Database.execute(
-                c, "UPDATE tokens SET consumed=true WHERE token_hash=?", t.get("token_hash"));
-            payments.complete(
-                c,
-                "charge",
-                Database.str(t, "state"),
-                f.get("decision").equals("approve") ? "CONFIRMED" : "REJECTED");
+    boolean post = req.getMethod().equals("POST");
+    if (!post && !req.getMethod().equals("GET"))
+      throw new ApiError(404, "not_found", "Unknown route");
+    Map<String, String> f = post ? form(new String(raw, StandardCharsets.UTF_8)) : q;
+    String token = f.getOrDefault(post ? "action_token" : "token", "");
+    if (token.isEmpty()) throw new ApiError(400, "invalid_request", "Action capability required");
+    return db.atomic(
+        c -> {
+          var job =
+              Database.one(
+                  c,
+                  "SELECT * FROM jobs WHERE client_id=? AND job_type='COMPLETION' AND"
+                      + " status='WAITING' AND payload::jsonb->>'payment_token'=?",
+                  config.client,
+                  token);
+          if (job == null) throw new ApiError(400, "invalid_request", "Invalid action");
+          var payload =
+              (com.fasterxml.jackson.databind.node.ObjectNode)
+                  Json.parse(Database.str(job, "payload"));
+          if (payload.path("expires_at").asLong() <= System.currentTimeMillis())
+            throw new ApiError(400, "invalid_request", "Expired action");
+          if (!post)
             return Reply.html(
-                "<!doctype html><html><body><p>Fake payment completed. Return to the local"
-                    + " simulator.</p></body></html>");
-          });
-    }
-    throw new ApiError(404, "not_found", "Unknown route");
+                "<!doctype html><html><body><h1>Local synthetic payment</h1><form method='post'"
+                    + " action='/demo/action'><input type='hidden' name='action_token' value='"
+                    + token
+                    + "'><input type='hidden' name='csrf' value='"
+                    + payload.path("csrf").asText()
+                    + "'><button name='decision' value='approve'>Confirm</button><button"
+                    + " name='decision' value='deny'>Reject</button></form></body></html>");
+          if (!WalletService.equal(payload.path("csrf").asText(), f.get("csrf"))
+              || !Set.of("approve", "deny").contains(f.getOrDefault("decision", "")))
+            throw new ApiError(400, "invalid_request", "Invalid action");
+          payload.put("state", f.get("decision").equals("approve") ? "CONFIRMED" : "REJECTED");
+          payload.put("detail", "USER_CANCELLED");
+          int n =
+              Database.execute(
+                  c,
+                  "UPDATE jobs SET payload=?,status='PENDING',next_attempt_at=now() WHERE id=? AND"
+                      + " status='WAITING'",
+                  Json.string(payload),
+                  job.get("id"));
+          if (n != 1) throw new ApiError(400, "invalid_request", "Action already consumed");
+          String target = payload.path("return_url").asText();
+          if (config.redirects.contains(target))
+            return new Reply(302, "", Map.of("Location", target, "Cache-Control", "no-store"));
+          return Reply.html(
+              "<!doctype html><html><body>Local payment completion scheduled</body></html>");
+        });
   }
 
   Reply control(HttpServletRequest req, String path, String method, byte[] raw) {

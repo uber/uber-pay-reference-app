@@ -27,7 +27,9 @@ class CoreTest {
   }
 
   Map<String, String> headers(byte[] raw, String target, Instant time) throws Exception {
-    String date = DateTimeFormatter.RFC_1123_DATE_TIME.format(time.atZone(ZoneOffset.UTC));
+    String date =
+        DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'", Locale.US)
+            .format(time.atZone(ZoneOffset.UTC));
     String digest =
         "SHA-256="
             + Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(raw));

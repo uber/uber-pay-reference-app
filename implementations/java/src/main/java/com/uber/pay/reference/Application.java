@@ -39,7 +39,12 @@ public class Application {
 
   @Bean
   Contracts contracts(Config c) {
-    return new Contracts(c.contract);
+    Contracts ct = new Contracts(c.contract);
+    if (c.strictAccountName)
+      ((com.fasterxml.jackson.databind.node.ArrayNode)
+              ct.spec.path("components").path("schemas").path("Account").path("required"))
+          .add("name");
+    return ct;
   }
 
   @Bean

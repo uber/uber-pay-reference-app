@@ -46,3 +46,7 @@ and contract-errata review, and independent sandbox qualification.
 The default refresh grant intentionally obtains an access token without
 rotating the refresh token; a production token-rotation/revocation policy is
 not claimed by this local reference example.
+
+## Review-hardened local policies
+
+`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. See the root `docs/review-follow-up.md` for unsupported flows and pending owner decisions.

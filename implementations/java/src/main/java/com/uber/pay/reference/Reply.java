@@ -29,9 +29,12 @@ record Reply(int status, String body, Map<String, String> headers) {
             "text/html; charset=utf-8",
             "Cache-Control",
             "no-store",
+            "Referrer-Policy",
+            "no-referrer",
             "X-Content-Type-Options",
             "nosniff",
             "Content-Security-Policy",
-            "default-src 'none'; form-action 'self'; style-src 'unsafe-inline'"));
+            "default-src 'none'; form-action 'self'; style-src 'unsafe-inline'; frame-ancestors"
+                + " 'none'"));
   }
 }

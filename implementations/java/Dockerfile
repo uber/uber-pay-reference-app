@@ -11,7 +11,7 @@ WORKDIR /app
 COPY --from=build /workspace/target/psp-reference-java-2.0.0.jar /app/gateway.jar
 COPY contracts /app/contracts
 COPY storage /app/storage
-ENV CONTRACTS_DIR=/app/contracts STORAGE_DIR=/app/storage
+ENV CONTRACT_FILE=/app/contracts/runtime.json MIGRATION_FILE=/app/storage/migrations/001_init.sql
 USER 10001
 EXPOSE 8080
 ENTRYPOINT ["java","-jar","/app/gateway.jar"]

@@ -51,6 +51,20 @@ final class CallbackWorker implements AutoCloseable {
                     "SELECT * FROM transactions WHERE client_id=? AND state='AUTHORIZED' AND"
                         + " expires_at<now()",
                     config.client)) payments.expire(c, t);
+            for (var waiting :
+                Database.query(
+                    c,
+                    "SELECT * FROM jobs WHERE client_id=? AND job_type='COMPLETION' AND"
+                        + " status='WAITING' AND (payload::jsonb->>'expires_at')::bigint<=?",
+                    config.client,
+                    System.currentTimeMillis())) {
+              payments.complete(
+                  c,
+                  Database.str(waiting, "tx_kind"),
+                  Database.str(waiting, "tx_id"),
+                  "REJECTED",
+                  "MERCHANT_EXPIRED");
+            }
             for (var j :
                 Database.query(
                     c,
@@ -63,7 +77,10 @@ final class CallbackWorker implements AutoCloseable {
                     c,
                     Database.str(j, "tx_kind"),
                     Database.str(j, "tx_id"),
-                    Json.parse(Database.str(j, "payload")).path("state").asText());
+                    Json.parse(Database.str(j, "payload")).path("state").asText(),
+                    Json.parse(Database.str(j, "payload"))
+                        .path("detail")
+                        .asText("MERCHANT_REJECTED"));
               } catch (ApiError e) {
                 Database.execute(
                     c, "UPDATE jobs SET status='DONE',lease_until=NULL WHERE id=?", j.get("id"));
@@ -92,14 +109,14 @@ final class CallbackWorker implements AutoCloseable {
               });
       if (j != null) deliver(j);
     } catch (Exception ignored) {
-      /* No request/token/PII is written to worker logs. Durable work remains visible in state. */
+      System.err.println(
+          "worker iteration failed; durable work retained (no request or credentials logged)");
     }
   }
 
   synchronized String token(String scope) throws Exception {
     Token current = tokenCache.get(scope);
-    if (current != null && current.expiry() > System.currentTimeMillis() + 1000)
-      return current.value();
+    if (current != null && current.expiry() > System.currentTimeMillis()) return current.value();
     String form =
         "grant_type=client_credentials&client_id="
             + PaymentService.enc(config.uberClient)
@@ -121,7 +138,9 @@ final class CallbackWorker implements AutoCloseable {
     long ttl = b.path("expires_in").asLong();
     if (value.isBlank() || ttl <= 0) throw new IllegalStateException("Invalid token response");
     tokenCache.put(
-        scope, new Token(value, System.currentTimeMillis() + Math.max(1, ttl - 5) * 1000));
+        scope,
+        new Token(
+            value, System.currentTimeMillis() + Math.max(0, ttl - Math.min(60, ttl / 10)) * 1000));
     return value;
   }
 

@@ -61,7 +61,7 @@ export class Worker {
         for (const action of actions.rows) {
           const payload = decode(action.payload);
           if (Number(payload.expires_at) <= Date.now()) {
-            await this.service.complete(db, action.tx_kind, action.tx_id, 'REJECTED');
+            await this.service.complete(db, action.tx_kind, action.tx_id, 'REJECTED', 'MERCHANT_EXPIRED');
             await db.query(`UPDATE jobs SET status='DONE',attempts=attempts+1 WHERE id=$1`, [action.id]);
           }
         }
@@ -70,7 +70,7 @@ export class Worker {
            AND next_attempt_at<=now() ORDER BY next_attempt_at LIMIT 10`, [config.clientId],
         );
         for (const job of pending.rows) {
-          await this.service.complete(db, job.tx_kind, job.tx_id, decode(job.payload).state);
+          await this.service.complete(db, job.tx_kind, job.tx_id, decode(job.payload).state, decode(job.payload).detail);
           await db.query(`UPDATE jobs SET status='DONE',attempts=attempts+1 WHERE id=$1`, [job.id]);
         }
       });
@@ -108,7 +108,7 @@ export class Worker {
       await response.body?.cancel();
       if (status === 401) this.tokens.delete(callback.scope);
     } catch { /* Network/credential failures are retryable, not a second PSP effect. */ }
-    const retryable = status === undefined || status === 429 || status >= 500;
+    const retryable = status === undefined || status === 401 || status === 429 || status >= 500;
     const state = status !== undefined && status >= 200 && status < 300 ? 'DONE'
       : status === 409 ? 'RECONCILE'
         : retryable && job.attempts < config.maxAttempts ? 'PENDING' : 'FAILED';

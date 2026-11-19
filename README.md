@@ -73,7 +73,7 @@ compose.yaml                Credential-free fake-money environment
 .github/workflows/          Per-language tests, conformance and container smoke gates
 ```
 
-The research `context/` folder remains outside this repository and is **not** required to build or test a clone. The API pin is inside `contracts/`. `make contract` verifies that the derived runtime makes only documented syntax repairs. `tools/check_contract.py --check-live` detects website drift without overwriting the pin.
+The clone is self-contained: the API pin and documented local compatibility profile are in `contracts/`. `make contract` verifies the source hash and reproducible normalization; `tools/check_contract.py --check-live` detects website drift without overwriting the pin. See [review disposition and remaining gates](docs/review-follow-up.md) before treating schema acceptance as feature support.
 
 ## Adapting this reference to your PSP
 

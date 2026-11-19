@@ -18,7 +18,14 @@ type Store struct {
 }
 
 func OpenStore(ctx context.Context, c Config) (*Store, error) {
-	pool, e := pgxpool.New(ctx, c.DatabaseURL)
+	pc, e := pgxpool.ParseConfig(c.DatabaseURL)
+	if e != nil {
+		return nil, e
+	}
+	pc.ConnConfig.RuntimeParams["application_name"] = c.ClientID
+	pc.ConnConfig.RuntimeParams["statement_timeout"] = "5000"
+	pc.ConnConfig.RuntimeParams["lock_timeout"] = "1500"
+	pool, e := pgxpool.NewWithConfig(ctx, pc)
 	if e != nil {
 		return nil, e
 	}
@@ -33,7 +40,7 @@ func OpenStore(ctx context.Context, c Config) (*Store, error) {
 	if _, e = pool.Exec(ctx, string(sql)); e != nil {
 		return fail(e)
 	}
-	for id, amount := range map[string]int64{"demo-account": 1000000000000000000, "insufficient-account": 100000} {
+	for id, amount := range map[string]int64{"demo-settlement": 1000000000000000000, "demo-account": 1000000000000000000, "insufficient-account": 100000} {
 		_, e = pool.Exec(ctx, "INSERT INTO accounts(client_id,account_id,currency,available_e5,balance_e5) VALUES($1,$2,'BRL',$3,$3) ON CONFLICT DO NOTHING", c.ClientID, id, amount)
 		if e != nil {
 			return fail(e)
@@ -46,7 +53,7 @@ func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
 	if e != nil {
 		return nil, e
 	}
-	_, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", s.Client)
+	_, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", s.Client)
 	if e != nil {
 		tx.Rollback(ctx)
 		return nil, e
@@ -62,19 +69,22 @@ func randomToken() string {
 }
 
 type Transaction struct {
-	Kind, ID, Ref, Original, Account, Currency, Capture, Funding, State, Detail, Hash, Response string
-	Amount                                                                                      int64
-	Status                                                                                      int
-	Created, Updated                                                                            time.Time
+	Kind, ID, Ref, Original, Account, Currency, Capture, Funding, State, Detail, Hash, Response, Source, Payee string
+	Amount                                                                                                     int64
+	Status                                                                                                     int
+	Created, Updated                                                                                           time.Time
 }
 
 func getTransaction(ctx context.Context, tx pgx.Tx, client, kind, id string) (Transaction, error) {
 	t := Transaction{}
-	e := tx.QueryRow(ctx, "SELECT kind,id,psp_reference,COALESCE(original_id,''),account_id,amount_e5,currency,capture_method,funding_method,state,COALESCE(detail,''),request_hash,response_status,response_body,created_at,updated_at FROM transactions WHERE client_id=$1 AND kind=$2 AND id=$3 FOR UPDATE", client, kind, id).Scan(&t.Kind, &t.ID, &t.Ref, &t.Original, &t.Account, &t.Amount, &t.Currency, &t.Capture, &t.Funding, &t.State, &t.Detail, &t.Hash, &t.Status, &t.Response, &t.Created, &t.Updated)
+	e := tx.QueryRow(ctx, "SELECT kind,id,psp_reference,COALESCE(original_id,''),account_id,amount_e5,currency,capture_method,funding_method,state,COALESCE(detail,''),request_hash,response_status,response_body,created_at,updated_at,COALESCE(source_account_id,''),COALESCE(payee_account_id,'') FROM transactions WHERE client_id=$1 AND kind=$2 AND id=$3 FOR UPDATE", client, kind, id).Scan(&t.Kind, &t.ID, &t.Ref, &t.Original, &t.Account, &t.Amount, &t.Currency, &t.Capture, &t.Funding, &t.State, &t.Detail, &t.Hash, &t.Status, &t.Response, &t.Created, &t.Updated, &t.Source, &t.Payee)
 	return t, e
 }
 func insertTransaction(ctx context.Context, tx pgx.Tx, client string, t Transaction) error {
 	_, e := tx.Exec(ctx, "INSERT INTO transactions(client_id,kind,id,psp_reference,original_id,account_id,amount_e5,currency,capture_method,funding_method,state,detail,request_hash,response_status,response_body,expires_at) VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,NULLIF($12,''),$13,$14,$15,CASE WHEN $11='AUTHORIZED' THEN now()+interval '72 hours' ELSE NULL END)", client, t.Kind, t.ID, t.Ref, t.Original, t.Account, t.Amount, t.Currency, t.Capture, t.Funding, t.State, t.Detail, t.Hash, t.Status, t.Response)
+	if e == nil {
+		_, e = tx.Exec(ctx, "UPDATE transactions SET source_account_id=NULLIF($4,''),payee_account_id=NULLIF($5,'') WHERE client_id=$1 AND kind=$2 AND id=$3", client, t.Kind, t.ID, t.Source, t.Payee)
+	}
 	return e
 }
 func accountBalance(ctx context.Context, tx pgx.Tx, client, account, currency string) (int64, int64, error) {

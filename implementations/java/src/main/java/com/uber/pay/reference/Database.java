@@ -5,7 +5,8 @@ import java.nio.file.Files;
 import java.sql.*;
 import java.util.*;
 
-final class Database {
+final class Database implements AutoCloseable {
+  final com.zaxxer.hikari.HikariDataSource pool;
   final Config config;
   final String url, user, password;
 
@@ -27,10 +28,24 @@ final class Database {
             + (uri.getPort() < 0 ? 5432 : uri.getPort())
             + uri.getPath()
             + "?connectTimeout=5";
+    var pc = new com.zaxxer.hikari.HikariConfig();
+    pc.setJdbcUrl(url);
+    pc.setUsername(user);
+    pc.setPassword(password);
+    pc.setMaximumPoolSize(10);
+    pc.setConnectionTimeout(5000);
+    pc.setInitializationFailTimeout(-1);
+    pc.addDataSourceProperty("ApplicationName", config.client);
+    pc.addDataSourceProperty("options", "-c statement_timeout=5000 -c lock_timeout=1500");
+    pool = new com.zaxxer.hikari.HikariDataSource(pc);
   }
 
   Connection open() throws SQLException {
-    return DriverManager.getConnection(url, user, password);
+    return pool.getConnection();
+  }
+
+  public void close() {
+    pool.close();
   }
 
   void initialize() {
@@ -39,15 +54,15 @@ final class Database {
       try (Statement st = c.createStatement()) {
         st.execute(sql);
       }
-      for (String account : List.of("demo-account", "insufficient-account"))
+      for (String account : List.of("demo-account", "demo-settlement", "insufficient-account"))
         execute(
             c,
             "INSERT INTO accounts(client_id,account_id,currency,available_e5,balance_e5)"
                 + " VALUES(?,?,'BRL',?,?) ON CONFLICT DO NOTHING",
             config.client,
             account,
-            account.equals("demo-account") ? 1000000000000000000L : 100000L,
-            account.equals("demo-account") ? 1000000000000000000L : 100000L);
+            !account.equals("insufficient-account") ? 1000000000000000000L : 100000L,
+            !account.equals("insufficient-account") ? 1000000000000000000L : 100000L);
     } catch (Exception e) {
       throw new IllegalStateException("Database initialization failed", e);
     }

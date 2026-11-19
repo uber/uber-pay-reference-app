@@ -72,6 +72,24 @@ final class WalletService {
   }
 
   Reply authorize(Map<String, String> q) {
+    if (!config.client.equals(q.get("client_id"))
+        || !config.redirects.contains(q.get("redirect_uri")))
+      throw new ApiError(400, "invalid_request", "Unregistered authorization request");
+    try {
+      return authorizeValidated(q);
+    } catch (ApiError e) {
+      String target = q.get("redirect_uri");
+      target +=
+          (target.contains("?") ? "&" : "?")
+              + "error="
+              + (e.code.equals("invalid_scope") ? "invalid_scope" : "invalid_request")
+              + "&state="
+              + PaymentService.enc(q.getOrDefault("state", ""));
+      return new Reply(302, "", Map.of("Location", target, "Cache-Control", "no-store"));
+    }
+  }
+
+  private Reply authorizeValidated(Map<String, String> q) {
     for (String k :
         List.of(
             "client_id",
@@ -240,7 +258,7 @@ final class WalletService {
               scope = scopes(Json.text(b, "scope"));
             } else return Reply.json(400, Json.obj("error", "unsupported_grant_type"));
             String refresh = random();
-            put(c, refresh, "REFRESH", acc, scope, null, null, family, 2592000);
+            put(c, refresh, "REFRESH", acc, scope, null, null, family, config.refreshTtlSeconds);
             WalletProvider.Identity identity = provider.describeAccount(acc);
             JsonNode detail =
                 Json.obj(
@@ -265,7 +283,7 @@ final class WalletService {
                         "authorization_details",
                         Json.MAPPER.createArrayNode().add(detail),
                         "expires_in",
-                        "2592000"));
+                        String.valueOf(config.refreshTtlSeconds)));
             contracts.response("/token", 200, Json.parse(out.body()), grant);
             return out;
           });

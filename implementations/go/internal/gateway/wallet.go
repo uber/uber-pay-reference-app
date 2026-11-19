@@ -44,24 +44,41 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if q.Get("client_id") != a.Config.ClientID || q.Get("response_type") != "code" || !a.Config.Redirects[q.Get("redirect_uri")] || q.Get("state") == "" || len(q.Get("state")) > 2048 || !validScopes(q.Get("scope")) {
+	if q.Get("client_id") != a.Config.ClientID || !a.Config.Redirects[q.Get("redirect_uri")] {
 		w.WriteHeader(400)
+		return
+	}
+	bad := func(code string) {
+		u, _ := url.Parse(q.Get("redirect_uri"))
+		p := u.Query()
+		p.Set("error", code)
+		p.Set("state", q.Get("state"))
+		u.RawQuery = p.Encode()
+		w.Header().Set("Location", u.String())
+		w.WriteHeader(302)
+	}
+	if !validScopes(q.Get("scope")) {
+		bad("invalid_scope")
+		return
+	}
+	if q.Get("response_type") != "code" || q.Get("state") == "" || len(q.Get("state")) > 2048 {
+		bad("invalid_request")
 		return
 	}
 	details, e := DecodeJSON([]byte(q.Get("authorization_details")))
 	if e != nil || a.Contract.Validate(Object{"type": "array", "items": Object{"$ref": "#/components/schemas/AuthorizationDetail"}}, details) != nil {
-		w.WriteHeader(400)
+		bad("invalid_request")
 		return
 	}
 	arr := details.([]any)
 	if len(arr) == 0 {
-		w.WriteHeader(400)
+		bad("invalid_request")
 		return
 	}
 	for _, x := range arr {
 		b := object(x)
 		if !knownFunding(str(b, "funding_method")) || (str(b, "account_id") != "" && str(b, "account_id") != "demo-account") {
-			w.WriteHeader(400)
+			bad("invalid_request")
 			return
 		}
 	}
@@ -160,11 +177,12 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 	ctx := r.Context()
 	tx, e := a.Store.Begin(ctx)
 	if e != nil {
-		bad("server_error")
+		a.write(w, Reply{Status: 500})
 		return
 	}
 	defer tx.Rollback(ctx)
 	account, scope, redirect := "demo-account", "", str(b, "redirect_uri")
+	family := ""
 	grant := str(b, "grant_type")
 	out := Object{"token_type": "bearer"}
 	responseSchema := "RefreshTokenResponse"
@@ -172,7 +190,21 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 	case "authorization_code":
 		code := str(b, "code")
 		var savedRedirect string
-		e = tx.QueryRow(ctx, "SELECT account_id,scope,redirect_uri FROM tokens WHERE token_hash=$1 AND kind='CODE' AND client_id=$2 AND NOT consumed AND expires_at>now() FOR UPDATE", fingerprint(code), a.Config.ClientID).Scan(&account, &scope, &savedRedirect)
+		var consumed bool
+		e = tx.QueryRow(ctx, "SELECT account_id,scope,redirect_uri,family_id,consumed FROM tokens WHERE token_hash=$1 AND kind='CODE' AND client_id=$2 AND expires_at>now() FOR UPDATE", fingerprint(code), a.Config.ClientID).Scan(&account, &scope, &savedRedirect, &family, &consumed)
+		if e == nil && consumed {
+			_, e = tx.Exec(ctx, "UPDATE tokens SET consumed=true WHERE client_id=$1 AND family_id=$2", a.Config.ClientID, family)
+			if e != nil || tx.Commit(ctx) != nil {
+				a.write(w, Reply{Status: 500})
+				return
+			}
+			bad("invalid_grant")
+			return
+		}
+		if e != nil && !notFound(e) {
+			a.write(w, Reply{Status: 500})
+			return
+		}
 		if e != nil || redirect != savedRedirect {
 			bad("invalid_grant")
 			return
@@ -182,17 +214,20 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 		old := str(b, "refresh_token")
 		e = tx.QueryRow(ctx, "SELECT account_id,scope FROM tokens WHERE token_hash=$1 AND kind='REFRESH' AND client_id=$2 AND NOT consumed AND expires_at>now() FOR UPDATE", fingerprint(old), a.Config.ClientID).Scan(&account, &scope)
 		if e != nil {
+			if !notFound(e) {
+				a.write(w, Reply{Status: 500})
+				return
+			}
 			bad("invalid_grant")
-			return
-		}
-		_, e = tx.Exec(ctx, "UPDATE tokens SET consumed=true WHERE token_hash=$1", fingerprint(old))
-		if e != nil {
-			bad("server_error")
 			return
 		}
 		access, err := a.putToken(ctx, tx, "ACCESS", account, scope, "", "", 10*time.Minute)
 		if err != nil {
-			bad("server_error")
+			a.write(w, Reply{Status: 500})
+			return
+		}
+		if _, e = tx.Exec(ctx, "UPDATE tokens SET family_id=(SELECT family_id FROM tokens WHERE token_hash=$1) WHERE token_hash=$2", fingerprint(old), fingerprint(access)); e != nil {
+			a.write(w, Reply{Status: 500})
 			return
 		}
 		out["access_token"] = access
@@ -206,7 +241,11 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 		}
 		account = identity.AccountID
 		scope = str(b, "scope")
-		if account != "demo-account" || !validScopes(scope) || !knownFunding(str(b, "funding_method")) {
+		if !validScopes(scope) {
+			bad("invalid_scope")
+			return
+		}
+		if account != "demo-account" || str(b, "country_iso2") != "BR" || !knownFunding(str(b, "funding_method")) {
 			bad("invalid_grant")
 			return
 		}
@@ -220,66 +259,56 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 		return
 	}
 	if e != nil {
-		bad("server_error")
+		a.write(w, Reply{Status: 500})
 		return
 	}
-	refresh, e := a.putToken(ctx, tx, "REFRESH", account, scope, "", "", 30*24*time.Hour)
-	if e != nil {
-		bad("server_error")
-		return
-	}
-	out["refresh_token"] = refresh
+	refresh := ""
 	if grant != "refresh_token" {
+		refresh, e = a.putToken(ctx, tx, "REFRESH", account, scope, "", "", a.Config.RefreshTTL)
+	}
+	if e != nil {
+		a.write(w, Reply{Status: 500})
+		return
+	}
+	if grant != "refresh_token" {
+		out["refresh_token"] = refresh
 		out["scope"] = scope
 		out["authorization_details"] = []any{Object{"type": "authorized_account", "account_id": account, "fingerprint": "demo-fingerprint", "display_name": "Demo wallet"}}
 	}
+	if family != "" && refresh != "" {
+		if _, e = tx.Exec(ctx, "UPDATE tokens SET family_id=$1 WHERE token_hash=$2", family, fingerprint(refresh)); e != nil {
+			a.write(w, Reply{Status: 500})
+			return
+		}
+	}
 	if a.Contract.Validate(Object{"$ref": "#/components/schemas/" + responseSchema}, out) != nil {
-		bad("server_error")
+		a.write(w, Reply{Status: 500})
 		return
 	}
 	if tx.Commit(ctx) != nil {
-		bad("server_error")
+		a.write(w, Reply{Status: 500})
 		return
 	}
 	a.write(w, Reply{200, encode(out)})
 }
 func (a *App) action(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		id := r.URL.Query().Get("id")
-		kind := r.URL.Query().Get("kind")
-		ctx := r.Context()
-		tx, e := a.Store.Begin(ctx)
-		if e != nil {
-			w.WriteHeader(500)
+	token := r.URL.Query().Get("token")
+	if r.Method == "POST" {
+		r.Body = http.MaxBytesReader(w, r.Body, 16384)
+		if r.ParseForm() != nil {
+			w.WriteHeader(400)
 			return
 		}
-		defer tx.Rollback(ctx)
-		t, e := getTransaction(ctx, tx, a.Config.ClientID, kind, id)
-		if e != nil || t.State != "PENDING" {
-			w.WriteHeader(404)
+		token = r.PostForm.Get("action_token")
+		if !secureEqual(r.PostForm.Get("csrf"), fingerprint("csrf:"+token)) {
+			w.WriteHeader(400)
 			return
 		}
-		token, e := a.putToken(ctx, tx, "ACTION", "demo-account", "", "", encode(Object{"id": id, "kind": kind}), 5*time.Minute)
-		if e != nil || tx.Commit(ctx) != nil {
-			w.WriteHeader(500)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		fmt.Fprintf(w, `<!doctype html><html><body><h1>Complete local fake payment</h1><form method="post" action="/demo/action"><input type="hidden" name="action_token" value="%s"><input type="hidden" name="csrf" value="%s"><button name="decision" value="approve">Confirm</button><button name="decision" value="deny">Reject</button></form></body></html>`, token, fingerprint("csrf:"+token))
-		return
-	}
-	if r.Method != "POST" {
+	} else if r.Method != "GET" {
 		w.WriteHeader(405)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 16384)
-	if r.ParseForm() != nil {
-		w.WriteHeader(400)
-		return
-	}
-	token := r.PostForm.Get("action_token")
-	if token == "" || !secureEqual(r.PostForm.Get("csrf"), fingerprint("csrf:"+token)) {
+	if token == "" {
 		w.WriteHeader(400)
 		return
 	}
@@ -301,6 +330,23 @@ func (a *App) action(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
+	if r.Method == "GET" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		fmt.Fprintf(w, `<!doctype html><html><body><h1>Local synthetic payment</h1><form method="post" action="/demo/action"><input type="hidden" name="action_token" value="%s"><input type="hidden" name="csrf" value="%s"><button name="decision" value="approve">Confirm</button><button name="decision" value="deny">Reject</button></form></body></html>`, html.EscapeString(token), fingerprint("csrf:"+token))
+		return
+	}
+	var completion string
+	if e = tx.QueryRow(ctx, "SELECT payload FROM jobs WHERE client_id=$1 AND tx_kind=$2 AND tx_id=$3 AND status='WAITING' AND job_type='COMPLETION'", a.Config.ClientID, str(object(v), "kind"), str(object(v), "id")).Scan(&completion); e != nil {
+		w.WriteHeader(400)
+		return
+	}
+	content, e := DecodeJSON([]byte(completion))
+	if e != nil {
+		w.WriteHeader(500)
+		return
+	}
 	state := "CONFIRMED"
 	if r.PostForm.Get("decision") == "deny" {
 		state = "REJECTED"
@@ -308,14 +354,25 @@ func (a *App) action(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		return
 	}
-	_, e = tx.Exec(ctx, "UPDATE tokens SET consumed=true WHERE token_hash=$1", fingerprint(token))
-	if e == nil {
-		_, e = tx.Exec(ctx, "UPDATE jobs SET payload=$4,status='PENDING',next_attempt_at=now() WHERE client_id=$1 AND tx_kind=$2 AND tx_id=$3 AND job_type='COMPLETION' AND status='WAITING'", a.Config.ClientID, str(object(v), "kind"), str(object(v), "id"), encode(Object{"state": state}))
+	result, e := tx.Exec(ctx, `UPDATE jobs SET payload=jsonb_set(jsonb_set(payload::jsonb,'{state}',to_jsonb($4::text)),'{detail}','"USER_CANCELLED"')::text,status='PENDING',next_attempt_at=now() WHERE client_id=$1 AND tx_kind=$2 AND tx_id=$3 AND job_type='COMPLETION' AND status='WAITING'`, a.Config.ClientID, str(object(v), "kind"), str(object(v), "id"), state)
+	if e != nil {
+		w.WriteHeader(500)
+		return
 	}
+	if result.RowsAffected() != 1 {
+		w.WriteHeader(400)
+		return
+	}
+	_, e = tx.Exec(ctx, "UPDATE tokens SET consumed=true WHERE token_hash=$1", fingerprint(token))
 	if e != nil || tx.Commit(ctx) != nil {
 		w.WriteHeader(500)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain")
-	_, _ = w.Write([]byte("Synthetic completion accepted; no real funds moved."))
+	if target := str(object(content), "return_url"); a.Config.Redirects[target] {
+		w.Header().Set("Location", target)
+		w.WriteHeader(302)
+		return
+	}
+	w.WriteHeader(200)
+	_, _ = w.Write([]byte("Local payment completion scheduled"))
 }

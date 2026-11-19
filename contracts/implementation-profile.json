@@ -27,7 +27,10 @@
     "MIGRATION_FILE": "storage/migrations/001_init.sql",
     "ENABLE_TEST_CONTROL": "false",
     "TEST_CONTROL_SECRET": "",
-    "OAUTH_REQUIRED": "false"
+    "OAUTH_REQUIRED": "false",
+    "ACTION_TTL_MS": "600000",
+    "REFRESH_TOKEN_TTL_SECONDS": "2592000",
+    "STRICT_ACCOUNT_NAME": "false"
   },
   "startup": "Run from repository root; execute shared CREATE IF NOT EXISTS migration at startup. GET /health checks DB readiness. Reject any MODE other than local. Containers use HOST=0.0.0.0 explicitly.",
   "accounts": {
@@ -43,20 +46,22 @@
     "DEMO_PENDING": "PENDING then durable worker CONFIRMED",
     "DEMO_PENDING_REJECT": "PENDING then durable worker REJECTED",
     "DEMO_WEBVIEW": "PENDING + web_view_user_input_action; requires local demo consent/completion before finalization",
-    "DEMO_QR": "PENDING + qr_code_input_action; requires local demo completion before finalization"
+    "DEMO_QR": "PENDING + qr_code_input_action; requires local demo completion before finalization",
+    "DEMO_CAPTURE_HARD": "MANUAL charge authorizes; capture422 BANK_HARD_ERROR",
+    "DEMO_CAPTURE_SOFT": "MANUAL charge authorizes; capture422 BANK_SOFT_ERROR"
   },
-  "ledger": "Automatic charges and payouts debit available and balance. Manual charge reserves available, capture debits balance, cancel/72h expiry releases available. Pending reserves available; rejection releases reservation. Refund credits on confirmed only; serialize refund reservations against original captured amount. Default account demo-account for webview authorization; access_token_authorization requires matching bearer/account.",
+  "ledger": "Charges debit the authenticated synthetic wallet. Payouts debit payer.id settlement account and credit payee.account.account_id only on confirmation; pending payouts reserve payer funds, rejection releases the reservation. Manual charges reserve available; capture debits balance, decline/cancel/72h expiry releases the hold. Pending refunds reserve refundable amount against the original charge. No external adapter calls are supported.",
   "responses": {
     "charge": "200 state object and psp_reference for all outcomes; MANUAL responds CONFIRMED but stores AUTHORIZED. Manual pending/action rejected400.",
-    "capture": "200 empty; excess400 EXCEEDS_CAPTURE_LIMIT, wrong currency/partial400 VALIDATION_ERROR; invalidstate409 INVALID_CHARGE_STATE",
+    "capture": "200 empty; excess400 EXCEEDS_CAPTURE_LIMIT, wrong currency/partial400 VALIDATION_ERROR; invalidstate409 INVALID_CHARGE_STATE; DEMO_CAPTURE_HARD/SOFT manual charges produce422 BANK_HARD_ERROR/BANK_SOFT_ERROR without debit.",
     "cancel": "200 empty; invalidstate409 INVALID_CHARGE_STATE",
     "findTransaction": "200 id,merchant_reference,status,amount; statuses declared enum only; lookup CANCELLED returns400 empty until owner resolves missing enum",
     "refund": "201 status CONFIRMED/PENDING/REJECTED + merchant_reference; partial allowed to captured amount; pending based on original funding method DEMO_PENDING*; original unknown404",
-    "payout": "200 state PENDING/CONFIRMED + psp_reference; initial rejection400 detail per schema",
+    "payout": "200 CONFIRMED/PENDING without actions; initial insufficient funds400; invalid-account400 INVALID_PAYMENT_DETAILS_ERROR; documented synthetic payee declines422; conflicting ID/key409. See demo-outcomes.json.",
     "balance": "200 available_balance + balance; signature AND bearer get_balance always required",
-    "errors": "Return declared operation-specific status/body shape; empty body when no response content declared. Same key/different payload400. Missing required idempotency header400. Auth401 only where declared, otherwise400. Do not invent 409 on /charge."
+    "errors": "Operation-specific declared errors; empty body where no content declared. Unexpected/transient failures return500 on ALL routes (provisional transient-5xx erratum), never400 and never persisted. Same key/changed payload returns400 except payout409 DUPLICATE_REQUEST_ERROR. Auth401 only where declared, otherwise400; token invalid signature ->400 invalid_request. Undeclared4xx are forbidden."
   },
-  "idempotency": "Required for charge,capture,cancel,initRefund,payout. operations PK(client_id,operation_name,idem_key), canonical sorted-key exact-integer request hash incl resource path. PG transaction advisory lock PER CLIENT serializes local fake ledger/idempotency, no remote calls under lock. Duplicate transaction create ID+samepayload returns saved original response even with new key; different payload400. 2xx/nonretryable4xx replay; do not persist5xx; auth before replay. OAuth grants atomic single-use, not money idempotency.",
+  "idempotency": "Required for charge,capture,cancel,initRefund,payout. operations PK(client_id,operation_name,idem_key), canonical sorted-key exact-integer request hash incl resource path. PG transaction advisory lock PER CLIENT serializes local fake ledger/idempotency, no remote calls under lock; lock_timeout1500ms and statement_timeout5000ms bound local waiting. Duplicate transaction create ID+samepayload returns saved original response even with new key; different payload400 (payout409). 2xx/nonretryable4xx replay; do not persist5xx; auth before replay. OAuth grants atomic single-use, not money idempotency.",
   "signature": {
     "algorithm": "rsa-sha256",
     "padding": "PKCS1 v1.5",
@@ -64,12 +69,12 @@
     "body_limit_bytes": 1048576,
     "payload": "(request-target): lowercase-method raw-path-with-query\nhost: exact Host\ndate: exact Date\ndigest: exact Digest",
     "digest": "SHA-256=base64(sha256(raw bytes)); empty bytes for GET",
-    "verify": "strict bounded params; keyId configured; algorithm exact; signed headers exact; no duplicate params; Date within configured skew; constant-time digest; no request logging of sensitive headers"
+    "verify": "strict bounded params; keyId configured; algorithm exact; signed headers exact; no duplicate params; Date within configured skew; constant-time digest; no request logging of sensitive headers; IMF-fixdate only; optional quoted created/expires impose additional freshness/expiry bounds and do not extend signed Date validity."
   },
   "oauth": {
     "authorize": "GET renders local-only explicit consent HTML, no auto grant; validate client,response_type,redirect_uri,scope,state,authorization_details JSON array. Consent POST /demo/consent (outside BASE_PATH) uses CSRF token to issue code+redirect echo state; fake identity demo-account local only.",
     "token": "POST signed JSON validates CLIENT_ID/SECRET. authorization_code -> refresh_token,token_type lowercase bearer,authorization_details; refresh_token -> access_token,token_type bearer,expires_in STRING; wallet custom grant -> refresh_token,token_type bearer,authorization_details. Runtime response validated by grant-selected schema because upstream response oneOf branches overlap.",
-    "tokens": "Hashes in tokens table. Code10min single use bound client redirect scopes account; access600sec; refresh longer-lived. Reject refresh as bearer. Accepted scopes charge refund get_balance offline_access. Local wallet_reference_data.payment_identifier must demo-account.",
+    "tokens": "Hashed tokens only. Code10min single use bound to client/redirect/scopes/account; reused code revokes issued family. Access600sec. Reusable refresh tokens have configurable REFRESH_TOKEN_TTL_SECONDS default2592000; no rotation until U2 resolved. Scopes charge/refund/get_balance/offline_access; refresh never accepted as bearer.",
     "enforcement": "OAUTH_REQUIRED=true requires bearer for charge/capture/cancel/refund. AccessTokenAuthorization always requires bearer and matching account; webview signature-only allowed unless OAUTH_REQUIRED. Balance always scoped bearer."
   },
   "callbacks": {
@@ -104,7 +109,7 @@
       "idempotency_header": true
     }
   },
-  "jobs": "COMPLETION jobs finalize pending transaction+ledger+CALLBACK job in same PG transaction, stable IDs include client/kind/tx. Webview/QR initially WAITING until consent/test complete. Worker claims via lease or SKIP LOCKED and retries after restart. CALLBACK jobs attempt network outside DB lock, token cache by scope, renew expires_in; retry429/5xx/timeouts with bounded backoff; 409->RECONCILE, permanent4xx/exhaustion->FAILED; acknowledgment only2xx. Every delivery uses stable key where declared. No duplicate side effects on retry.",
+  "jobs": "COMPLETION jobs finalize pending transaction+ledger+CALLBACK job in same PG transaction, stable IDs include client/kind/tx. Webview/QR initially WAITING until consent/test complete. Worker claims via lease or SKIP LOCKED and retries after restart. CALLBACK jobs attempt network outside DB lock, token cache by scope, renew expires_in with min(60s,10%) margin; 401 evicts token and schedules bounded retry with unchanged event key; retry429/5xx/timeouts with bounded backoff; 409->RECONCILE, other permanent4xx/exhaustion->FAILED; acknowledgment only2xx. Every delivery uses stable key where declared. No duplicate side effects on retry.",
   "test_control": {
     "guard": "Only ENABLE_TEST_CONTROL=true and nonempty random TEST_CONTROL_SECRET; X-Test-Control-Secret required; outside BASE_PATH under /_test; disabled default",
     "GET /_test/state": "JSON accounts/transactions/jobs synthetic data, no token hashes or secrets",
@@ -112,5 +117,12 @@
     "POST /_test/expire": "{id} expires authorized charge through normal release logic",
     "POST /_test/callback": "{name,id,payload} queues one of six typed callbacks for contract tests"
   },
-  "safety": "Outbound hosts allowed only localhost,127.0.0.1,::1,mock-uber in local mode; refuse userinfo and redirects. Nonlocal MODE fails startup. No production serving mode; real PSP/wallet adapters and security review required for sandbox. Never claim actual Uber qualification from local tests."
+  "safety": "Outbound hosts allowed only localhost,127.0.0.1,::1,mock-uber in local mode; refuse userinfo and redirects. Nonlocal MODE fails startup. No production serving mode; real PSP/wallet adapters and security review required for sandbox. Never claim actual Uber qualification from local tests.",
+  "actions": "Generate a 256-bit unguessable capability when creating a WAITING charge; GET never mints authority from an Uber ID. POST requires capability+CSRF+unexpired WAITING job; single-use across races. ACTION_TTL_MS defaults10min and is the QR expiry. User deny ->USER_CANCELLED; expiry ->MERCHANT_EXPIRED; both release hold and queue rejection. Redirect only to exact ALLOWED_REDIRECT_URIS; no redirect for an unregistered return_url.",
+  "limitations": [
+    "Synthetic local processor only; no external intent/dispatch/finalization/reconciliation executor or production serving mode.",
+    "Validated payment/KYC fields reach native adapter commands in memory; real KYC/routing/conversion policy, full locale consent presentation, and remaining feature limits are documented in docs/review-follow-up.md.",
+    "Deposit callbacks are typed client fixtures only until U11; settlement delivery bilateral.",
+    "CONFIRMED-to-REJECTED refund reversal is not implemented; pending owner-confirmed accounting design."
+  ]
 }

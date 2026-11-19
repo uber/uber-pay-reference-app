@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from .contract import ROOT
+from .coverage import report as coverage_report
 from .mock_uber import MockUber
 from .suite import GatewaySuite
 from .wire import Client, eventually, keys
@@ -266,6 +267,7 @@ def main():
             ENABLE_TEST_CONTROL="true",
             TEST_CONTROL_SECRET=secret,
             ASYNC_DELAY_MS="500",
+            ACTION_TTL_MS="2500",
             WORKER_INTERVAL_MS="100",
             CALLBACK_RETRY_MS="100",
             CALLBACK_MAX_ATTEMPTS="5",
@@ -289,6 +291,7 @@ def main():
                     "process": process,
                     "client_id": namespace,
                     "client_secret": "demo-secret",
+                    "database_url": args.database_url,
                 },
             )
             tests = unittest.defaultTestLoader.loadTestsFromTestCase(test_class)
@@ -296,7 +299,19 @@ def main():
                 tests = unittest.TestSuite(t for t in tests if args.match in t.id())
             runner = unittest.TextTestRunner(verbosity=2, resultclass=Report)
             result = runner.run(tests)
-            summaries.append(write_report(output, language, result, mock.events))
+            summary = write_report(output, language, result, mock.events)
+            summary["response_coverage"] = coverage_report(client.observed)
+            (output / f"{language}.coverage.json").write_text(
+                json.dumps(summary["response_coverage"], indent=2)
+            )
+            (output / f"{language}.json").write_text(json.dumps(summary, indent=2))
+            summaries.append(summary)
+            if not args.match and summary["response_coverage"]["missing"]:
+                success = False
+                print(
+                    f"{language}: missing declared status coverage: {summary['response_coverage']['missing']}",
+                    file=sys.stderr,
+                )
             success &= (
                 result.wasSuccessful() and not result.skipped and result.testsRun > 0
             )

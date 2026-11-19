@@ -1516,8 +1516,7 @@
         },
         "required": [
           "id",
-          "type",
-          "name"
+          "type"
         ]
       },
       "SourceAccount": {

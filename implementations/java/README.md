@@ -41,3 +41,7 @@ implementations/java/mvnw test package
 ```
 
 Unit tests cover exact int64 values, schema composition, bounded malformed signatures, stale/future signatures, raw-target/body tampering, all callback builders, all public adapter ports, and nonlocal-mode guards. The root black-box suite tests the same server-visible behaviors as Node and Go, including concurrent duplication, capture/cancel races, explicit consent, all token grants, callbacks/retries, and process restart.
+
+## Review-hardened local policies
+
+`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. See the root `docs/review-follow-up.md` for unsupported flows and pending owner decisions.

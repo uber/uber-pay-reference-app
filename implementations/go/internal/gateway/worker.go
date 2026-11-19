@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -101,6 +102,11 @@ func (p *UberTokenProvider) Get(ctx context.Context, a *App, scope string) (stri
 	p.entries[scope] = cachedToken{token, time.Now().Add(time.Duration(secs-margin) * time.Second)}
 	return token, nil
 }
+func (p *UberTokenProvider) Invalidate(scope string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.entries, scope)
+}
 func (a *App) RunWorkers(ctx context.Context) {
 	ticker := time.NewTicker(a.Config.Interval)
 	defer ticker.Stop()
@@ -167,6 +173,11 @@ func (a *App) expireAuthorizations(ctx context.Context) error {
 			return e
 		}
 	}
+	_, e = tx.Exec(ctx, `UPDATE jobs SET status='PENDING',payload=jsonb_set(jsonb_set(payload::jsonb,'{state}','"REJECTED"'),'{detail}','"MERCHANT_EXPIRED"')::text,next_attempt_at=now()
+ WHERE client_id=$1 AND job_type='COMPLETION' AND status='WAITING' AND (payload::jsonb->>'expires_at')::bigint <= $2`, a.Config.ClientID, time.Now().UnixMilli())
+	if e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 func (a *App) processCompletion(ctx context.Context) (bool, error) {
@@ -196,7 +207,7 @@ func (a *App) processCompletion(ctx context.Context) (bool, error) {
 		return false, e
 	}
 	if t.State == "PENDING" {
-		if e = a.completeTransaction(ctx, tx, t, state); e != nil {
+		if e = a.completeTransaction(ctx, tx, t, state, str(object(v), "detail")); e != nil {
 			return false, e
 		}
 	}
@@ -206,7 +217,7 @@ func (a *App) processCompletion(ctx context.Context) (bool, error) {
 	}
 	return true, tx.Commit(ctx)
 }
-func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction, state string) error {
+func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction, state string, detail string) error {
 	if t.State != "PENDING" {
 		return nil
 	}
@@ -234,14 +245,22 @@ func (a *App) completeTransaction(ctx context.Context, tx pgx.Tx, t Transaction,
 			return e
 		}
 	}
-	_, e := tx.Exec(ctx, "UPDATE transactions SET state=$4,detail=CASE WHEN $4='REJECTED' THEN 'MERCHANT_REJECTED' ELSE NULL END,updated_at=now() WHERE client_id=$1 AND kind=$2 AND id=$3", a.Config.ClientID, t.Kind, t.ID, state)
+	if t.Kind == "payout" && state == "CONFIRMED" {
+		if e := adjust(ctx, tx, a.Config.ClientID, t.Payee, t.Currency, t.Amount, t.Amount); e != nil {
+			return e
+		}
+	}
+	if detail == "" {
+		detail = "MERCHANT_REJECTED"
+	}
+	_, e := tx.Exec(ctx, "UPDATE transactions SET state=$4,detail=CASE WHEN $4='REJECTED' THEN $5 ELSE NULL END,updated_at=now() WHERE client_id=$1 AND kind=$2 AND id=$3", a.Config.ClientID, t.Kind, t.ID, state, detail)
 	if e != nil {
 		return e
 	}
 	callback := "chargeCallback"
 	payload := Object{"state": Object{"value": state}, "psp_reference": t.Ref}
 	if state == "REJECTED" {
-		object(payload["state"])["detail"] = "MERCHANT_REJECTED"
+		object(payload["state"])["detail"] = detail
 	}
 	if t.Kind == "payout" {
 		callback = "payoutCallback"
@@ -305,6 +324,9 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 			}
 		}
 	}
+	if code == 401 {
+		a.Tokens.Invalidate(scope)
+	}
 	status := "PENDING"
 	last := "retryable callback failure"
 	if e == nil && code >= 200 && code < 300 {
@@ -313,7 +335,7 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	} else if code == 409 {
 		status = "RECONCILE"
 		last = "callback conflict requires reconciliation"
-	} else if e == nil && code >= 400 && code < 500 && code != 429 || attempts+1 >= a.Config.MaxAttempts {
+	} else if e == nil && code >= 400 && code < 500 && code != 429 && code != 401 || attempts+1 >= a.Config.MaxAttempts {
 		status = "FAILED"
 		last = "callback rejected or retry budget exhausted"
 	}
@@ -325,6 +347,7 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	if delay > 30*time.Second {
 		delay = 30 * time.Second
 	}
+	delay += time.Duration(rand.Int64N(max(1, int64(a.Config.Retry/5))))
 	_, err := a.Store.Pool.Exec(ctx, "UPDATE jobs SET status=$2,lease_until=NULL,last_error=NULLIF($3,''),next_attempt_at=now()+($4*interval '1 millisecond') WHERE id=$1 AND status='PROCESSING' AND lease_until=$5", id, status, last, delay.Milliseconds(), lease)
 	return true, err
 }

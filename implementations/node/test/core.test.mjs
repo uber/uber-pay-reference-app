@@ -84,7 +84,10 @@ test('request validator checks nested required fields and int64 overflow', () =>
   for (const value of [{ value: 1n }, { value: MAX_INT64 + 1n, currency: 'BRL' }, { value: '1', currency: 'BRL' }]) {
     assert.throws(() => contract.validate(value, currency));
   }
-  assert.throws(() => contract.validate({ type: 'Account', id: 'x' }, contract.spec.components.schemas.Account));
+  assert.doesNotThrow(() => contract.validate({ type: 'Account', id: 'x' }, contract.spec.components.schemas.Account));
+  assert.throws(() => contract.validate({ type: 'Account' }, contract.spec.components.schemas.Account));
+  const strict = new Contract(root, 'contracts/runtime.json', true);
+  assert.throws(() => strict.validate({ type: 'Account', id: 'x' }, strict.spec.components.schemas.Account));
 });
 
 test('all six callback builders enforce required payloads and correct scopes', () => {

@@ -21,7 +21,7 @@ export function parseSignature(header: string): Record<string, string> {
     out[name] = match[2]!;
     pos = matcher.lastIndex;
   }
-  if (Object.keys(out).length !== 4 || !out.keyId || !out.algorithm || !out.headers || !out.signature) {
+  if (Object.keys(out).some(k => !['keyId','algorithm','headers','signature','created','expires'].includes(k)) || !out.keyId || !out.algorithm || !out.headers || !out.signature) {
     throw new Error('Incomplete Signature');
   }
   return out;
@@ -38,14 +38,20 @@ export function verifyRequest(
   if (a.length !== b.length || !timingSafeEqual(a, b)) throw new Error('Digest mismatch');
   const date = single(headers, 'date');
   const timestamp = Date.parse(date);
-  if (!Number.isFinite(timestamp) || !date.endsWith(' GMT') || Math.abs(now - timestamp) > skewSeconds * 1000) {
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toUTCString() !== date || Math.abs(now - timestamp) > skewSeconds * 1000) {
     throw new Error('Date outside freshness window');
   }
   const signature = parseSignature(single(headers, 'signature'));
   if (signature.algorithm !== 'rsa-sha256' || signature.headers !== '(request-target) host date digest') {
     throw new Error('Unsupported signature algorithm or header order');
   }
-  const key = keys[signature.keyId!];
+  for (const field of ['created','expires']) {
+    const value = signature[field];
+    if (value !== undefined && (!/^\d{1,12}$/.test(value) || !Number.isSafeInteger(Number(value)))) throw new Error('Invalid signature time');
+  }
+  if (signature.created !== undefined && Math.abs(now / 1000 - Number(signature.created)) > skewSeconds) throw new Error('Stale created time');
+  if (signature.expires !== undefined && (Number(signature.expires) < now / 1000 || Number(signature.expires) < Number(signature.created ?? 0))) throw new Error('Expired signature');
+  const key = Object.hasOwn(keys, signature.keyId!) ? keys[signature.keyId!] : undefined;
   if (!key) throw new Error('Unknown keyId');
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signature.signature!)) throw new Error('Invalid signature encoding');
   const payload = `(request-target): ${method.toLowerCase()} ${target}\nhost: ${single(headers, 'host')}\ndate: ${date}\ndigest: ${digest}`;

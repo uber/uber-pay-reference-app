@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify pinned source integrity, reproducible syntax normalization, and schema validity."""
+"""Verify pinned source integrity, reproducible documented normalization, and schema validity."""
 
 import argparse
 import copy
@@ -22,6 +22,7 @@ def normalized(source):
             if param.get("in") == "path":
                 param["required"] = True
                 param["schema"].pop("required", None)
+    result["components"]["schemas"]["Account"]["required"].remove("name")
     return result
 
 
@@ -43,7 +44,7 @@ def main():
     )
     runtime = json.loads((ROOT / "contracts/runtime.json").read_text())
     assert runtime == normalized(source), (
-        "runtime.json differs from documented syntax-only normalization"
+        "runtime.json differs from documented local normalization (including provisional U1)"
     )
     refs = []
 

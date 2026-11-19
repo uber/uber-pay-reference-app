@@ -1,15 +1,141 @@
 {
   "scope": "local reference profile only; not Uber production approval",
   "entries": [
-    {"id":"payout-required-array","pointer":"/components/schemas/PayoutCallbackState/required","kind":"schema syntax","before":"value","after":["value"],"reason":"OpenAPI required must be an array; preserves the declared field."},
-    {"id":"path-required-location","pointers":["/paths/~1charge~1{id}~1capture/post/parameters","/paths/~1charge~1{id}~1cancel/post/parameters"],"kind":"schema syntax","reason":"Move required:true from path parameter schema to parameter. No request field added."},
-    {"id":"token-response-overlap","kind":"validation dispatch","reason":"RefreshTokenResponse and WalletGrantRefreshTokenResponse overlap structurally, so validate token responses by the request grant type. Do not alter upstream oneOf."},
-    {"id":"account-name-required","kind":"upstream inconsistency","reason":"Account requires name but omits it from properties. Honor required and include synthetic name in fixtures; additional properties remain allowed."},
-    {"id":"refund-status","kind":"semantic launch gate","reason":"Use declared CONFIRMED/PENDING/REJECTED, not contradictory SUCCEEDED/FAILED examples."},
-    {"id":"lookup-status","kind":"semantic launch gate","reason":"Use declared enum, not example SUCCEEDED. CANCELLED lookup returns declared400/empty in local profile until owner confirms mapping."},
-    {"id":"payout-rejection","kind":"semantic launch gate","reason":"Initial rejection uses declared400 with detail; never emit initial REJECTED outside enum. Async rejection uses payoutCallback."},
-    {"id":"partial-capture","kind":"semantic launch gate","reason":"Only full capture enabled; partial amount returns declared400 VALIDATION_ERROR until semantics agreed."},
-    {"id":"callback-routing","kind":"semantic launch gate","reason":"All six callback builders tested; demo charge/refund/payout use corresponding modern callback. Legacy deposit callbacks are explicit client/test functions, not automatic charge routing."}
+    {
+      "id": "payout-required-array",
+      "pointer": "/components/schemas/PayoutCallbackState/required",
+      "kind": "schema syntax",
+      "before": "value",
+      "after": [
+        "value"
+      ],
+      "reason": "OpenAPI required must be an array; preserves the declared field."
+    },
+    {
+      "id": "path-required-location",
+      "pointers": [
+        "/paths/~1charge~1{id}~1capture/post/parameters",
+        "/paths/~1charge~1{id}~1cancel/post/parameters"
+      ],
+      "kind": "schema syntax",
+      "reason": "Move required:true from path parameter schema to parameter. No request field added."
+    },
+    {
+      "id": "token-response-overlap",
+      "kind": "validation dispatch",
+      "reason": "RefreshTokenResponse and WalletGrantRefreshTokenResponse overlap structurally, so validate token responses by the request grant type. Do not alter upstream oneOf."
+    },
+    {
+      "id": "account-name-required",
+      "kind": "upstream inconsistency",
+      "reason": "Provisional local interoperability choice: examples omit undefined Account.name. Remove name from runtime required by default; STRICT_ACCOUNT_NAME=true restores the upstream requirement. Uber owner approval is outstanding (U1).",
+      "decision": "U1"
+    },
+    {
+      "id": "refund-status",
+      "kind": "semantic launch gate",
+      "reason": "Use declared CONFIRMED/PENDING/REJECTED, not contradictory SUCCEEDED/FAILED examples."
+    },
+    {
+      "id": "lookup-status",
+      "kind": "semantic launch gate",
+      "reason": "Use declared enum, not example SUCCEEDED. CANCELLED lookup returns declared400/empty in local profile until owner confirms mapping.",
+      "decision": "U4"
+    },
+    {
+      "id": "payout-rejection",
+      "kind": "semantic launch gate",
+      "reason": "Initial rejection uses declared400 with detail; never emit initial REJECTED outside enum. Async rejection uses payoutCallback."
+    },
+    {
+      "id": "partial-capture",
+      "kind": "semantic launch gate",
+      "reason": "Only full capture enabled; partial amount returns declared400 VALIDATION_ERROR until semantics agreed.",
+      "decision": "U5"
+    },
+    {
+      "id": "callback-routing",
+      "kind": "semantic launch gate",
+      "reason": "All six callback builders tested; demo charge/refund/payout use corresponding modern callback. Legacy deposit callbacks are explicit client/test functions, not automatic charge routing. Deposit cash-in/top-up orchestration and amount-update semantics remain unimplemented pending U11; builders alone are not flow coverage.",
+      "decision": "U11"
+    },
+    {
+      "id": "transient-5xx",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U3",
+      "reason": "Unexpected infrastructure or database failures return retryable HTTP 500 on every route, including routes without a declared 5xx. Such undeclared responses have an empty body and are never replay-persisted. Auth failures retain declared per-route statuses; this is a provisional deviation, not approved by Uber.",
+      "approved_for_live": false
+    },
+    {
+      "id": "refresh-reuse",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U2",
+      "reason": "Use reusable refresh tokens with no rotated refresh_token field in AccessTokenResponse in all languages; lifetime defaults to configurable 30 days. Reuse of an authorization code revokes its issued token family. Rotation/reuse-grace policy awaits Uber client confirmation.",
+      "approved_for_live": false
+    },
+    {
+      "id": "capture-decline",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U6",
+      "reason": "Follow declared 422 and a BANK_HARD_ERROR or BANK_SOFT_ERROR detail, not diagram 200 REJECTED. No debit occurs and the local authorization hold is released.",
+      "approved_for_live": false
+    },
+    {
+      "id": "cancel-empty-response",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U7",
+      "reason": "Follow the empty 200 response schema, not diagram 200 {state:CANCELLED}.",
+      "approved_for_live": false
+    },
+    {
+      "id": "lookup-identity",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U8",
+      "reason": "Lookup uses the Uber transaction ID (or Uber refund ID), not diagram psp_reference. merchant_reference mismatch returns declared404.",
+      "approved_for_live": false
+    },
+    {
+      "id": "rejected-callback-reference",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U9",
+      "reason": "Always include psp_reference on rejected charge callbacks, following the required schema rather than optional prose.",
+      "approved_for_live": false
+    },
+    {
+      "id": "code-exchange-response",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U10",
+      "reason": "Code exchange returns a refresh token only, following the declared schema, not the diagram showing an access token too.",
+      "approved_for_live": false
+    },
+    {
+      "id": "balance-request",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U12",
+      "reason": "Use account_id and funding_method per schema, not diagram payment_instrument.",
+      "approved_for_live": false
+    },
+    {
+      "id": "refund-request-response",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U13",
+      "reason": "Use original_transaction_id/original_merchant_reference/CurrencyAmount and 201 CONFIRMED/PENDING/REJECTED per schema, not the conflicting request/status diagram.",
+      "approved_for_live": false
+    },
+    {
+      "id": "payout-conflict",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U14",
+      "reason": "Changed payload under a payout ID or idempotency key returns declared409 DUPLICATE_REQUEST_ERROR; identical payload replays. Other operations keep their own declared mappings.",
+      "approved_for_live": false
+    },
+    {
+      "id": "settlement-bilateral",
+      "kind": "provisional local profile / owner decision",
+      "decision": "U15",
+      "reason": "Retain source_account_id for reconciliation. No bilateral file format, cadence, SFTP or delivery promise is invented by the local reference.",
+      "approved_for_live": false
+    }
   ],
   "approved_for_live": false
 }

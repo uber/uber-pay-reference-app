@@ -17,11 +17,13 @@ type Config struct {
 	PublicBaseURL, CallbackBaseURL, TokenURL                                                  string
 	Redirects                                                                                 map[string]bool
 	Keys                                                                                      map[string]*rsa.PublicKey
-	MaxSkew, AsyncDelay, Interval, Retry                                                      time.Duration
+	MaxSkew, AsyncDelay, Interval, Retry, ActionTTL                                           time.Duration
 	MaxAttempts                                                                               int
 	TestControl                                                                               bool
 	TestSecret                                                                                string
 	OAuthRequired                                                                             bool
+	StrictAccountName                                                                         bool
+	RefreshTTL                                                                                time.Duration
 	ContractFile, MigrationFile                                                               string
 }
 
@@ -119,6 +121,15 @@ func LoadConfig() (Config, error) {
 	if c.TestControl && len(c.TestSecret) < 16 {
 		return c, errors.New("test control requires a random secret of at least 16 characters")
 	}
+	c.ActionTTL, e = duration("ACTION_TTL_MS", "600000", time.Millisecond)
+	if e != nil {
+		return c, e
+	}
+	c.RefreshTTL, e = duration("REFRESH_TOKEN_TTL_SECONDS", "2592000", time.Second)
+	if e != nil {
+		return c, e
+	}
+	c.StrictAccountName = env("STRICT_ACCOUNT_NAME", "false") == "true"
 	c.OAuthRequired = env("OAUTH_REQUIRED", "false") == "true"
 	c.ContractFile = env("CONTRACT_FILE", "contracts/runtime.json")
 	c.MigrationFile = env("MIGRATION_FILE", "storage/migrations/001_init.sql")

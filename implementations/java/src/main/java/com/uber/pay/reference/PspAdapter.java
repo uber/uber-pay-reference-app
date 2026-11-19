@@ -12,18 +12,65 @@ public interface PspAdapter {
   }
 
   record ChargeCommand(
-      String fundingMethod, String captureMethod, long amountE5, long availableE5) {}
+      String fundingMethod,
+      String captureMethod,
+      long amountE5,
+      long availableE5,
+      com.fasterxml.jackson.databind.JsonNode request) {
+    public ChargeCommand(String f, String c, long a, long v) {
+      this(f, c, a, v, Json.obj());
+    }
+  }
 
-  record PayoutCommand(String fundingMethod, long amountE5, long availableE5) {}
+  record PayoutCommand(
+      String fundingMethod,
+      long amountE5,
+      long availableE5,
+      com.fasterxml.jackson.databind.JsonNode request) {
+    public PayoutCommand(String f, long a, long v) {
+      this(f, a, v, Json.obj());
+    }
+  }
 
   record CaptureCommand(
-      String state, long authorizedE5, String authorizedCurrency, long amountE5, String currency) {}
+      String state,
+      long authorizedE5,
+      String authorizedCurrency,
+      long amountE5,
+      String currency,
+      String fundingMethod) {
+    public CaptureCommand(
+        String state,
+        long authorizedE5,
+        String authorizedCurrency,
+        long amountE5,
+        String currency) {
+      this(state, authorizedE5, authorizedCurrency, amountE5, currency, "DEMO_SYNC");
+    }
+  }
 
   record CancelCommand(String state) {}
 
-  record RefundCommand(String fundingMethod, long amountE5, long refundableE5) {}
+  record RefundCommand(
+      String fundingMethod,
+      long amountE5,
+      long refundableE5,
+      com.fasterxml.jackson.databind.JsonNode request) {
+    public RefundCommand(String f, long a, long v) {
+      this(f, a, v, Json.obj());
+    }
+  }
 
-  record BalanceCommand(String fundingMethod, String currency, long availableE5, long balanceE5) {}
+  record BalanceCommand(
+      String fundingMethod,
+      String currency,
+      long availableE5,
+      long balanceE5,
+      com.fasterxml.jackson.databind.JsonNode request) {
+    public BalanceCommand(String f, String c, long a, long v) {
+      this(f, c, a, v, Json.obj());
+    }
+  }
 
   record Snapshot(
       String id,

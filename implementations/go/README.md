@@ -31,7 +31,7 @@ The test runner builds this executable, creates an isolated client namespace, ge
 | `adapter.go` | Typed PSP and wallet interfaces plus synthetic providers |
 | `app.go` | Route dispatch, auth-before-replay, operation-specific responses and orchestration |
 | `store.go` | PostgreSQL migration, identity, fake balances and durable job insertion |
-| `wallet.go` | Explicit local consent, single-use codes, three token grants and token rotation |
+| `wallet.go` | Explicit local consent, single-use codes, three token grants and family revocation |
 | `worker.go` | Completion/expiry, six callback contracts, scoped tokens, leases and retries |
 | `control.go` | Secret-protected, disabled-by-default conformance controls |
 
@@ -43,4 +43,8 @@ The sample ledger's debit/reserve/refund effects and idempotent response are com
 
 `PspAdapter` exposes charge, capture, cancel, refund, payout, balance, and operation lookup. `WalletProvider` isolates the fake consent identity and reference exchange. Internal pending/authorized states are mapped to the pinned wire contract; partial capture and ambiguous upstream variants remain gated as documented in the shared errata.
 
-The callback worker performs network I/O outside database transactions. Callback 409 is recorded as `RECONCILE`, permanent errors/retry exhaustion as `FAILED`, and only 2xx as `DONE`. A stable callback identity is reused where the callback supports an idempotency header. Refresh tokens are hashed and rotated; access tokens cannot be replaced by refresh tokens on payment routes.
+The callback worker performs network I/O outside database transactions. Callback 409 is recorded as `RECONCILE`, permanent errors/retry exhaustion as `FAILED`, and only 2xx as `DONE`. A stable callback identity is reused where the callback supports an idempotency header. Refresh tokens are reusable without rotation in the provisional local profile; authorization-code reuse revokes the issued token family.
+
+## Review-hardened local policies
+
+`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. See the root `docs/review-follow-up.md` for unsupported flows and pending owner decisions.

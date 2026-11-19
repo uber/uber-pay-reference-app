@@ -13,7 +13,11 @@ const JSONBig = JSONBigFactory({
 
 export type Json = any;
 export function decode(value: string | Buffer): Json {
-  try { return JSONBig.parse(Buffer.isBuffer(value) ? new TextDecoder('utf-8', { fatal: true }).decode(value) : value); }
+  try {
+    const text = Buffer.isBuffer(value) ? new TextDecoder('utf-8', { fatal: true }).decode(value) : value;
+    JSON.parse(text); // Grammar only: discard this result; exact-number parser remains authoritative.
+    return JSONBig.parse(text);
+  }
   catch { throw new SyntaxError('Invalid JSON'); }
 }
 export const encode = (value: Json): string => JSONBig.stringify(value);
