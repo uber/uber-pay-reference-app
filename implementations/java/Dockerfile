@@ -4,6 +4,7 @@ COPY implementations/java/pom.xml ./pom.xml
 COPY implementations/java/.mvn/settings.xml /tmp/maven-settings.xml
 RUN mvn -s /tmp/maven-settings.xml -B dependency:go-offline
 COPY implementations/java/src ./src
+COPY contracts ./contracts
 RUN mvn -s /tmp/maven-settings.xml -B package
 FROM eclipse-temurin:21-jre
 WORKDIR /app
