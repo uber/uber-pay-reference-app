@@ -446,12 +446,6 @@ class CompletionSuite:
         self.mock.fail_next("chargeCallback", data["id"], 200, 503)
         other = None
         try:
-            self.assert_response(
-                self.client.request("POST", "/charge", data, idem=self.uid()),
-                "/charge",
-                200,
-            )
-            self.assertTrue(first.entered.wait(4))
             env = dict(self.process.environment, PORT=str(port()))
             other = GatewayProcess(
                 self.process.argv,
@@ -473,6 +467,15 @@ class CompletionSuite:
                 ),
                 timeout=35,
             )
+            # Both workers must be ready before the callback is blocked. Otherwise
+            # JVM startup can consume the first worker's HTTP deadline and create
+            # ordinary retries before this lease-stealing scenario even begins.
+            self.assert_response(
+                self.client.request("POST", "/charge", data, idem=self.uid()),
+                "/charge",
+                200,
+            )
+            self.assertTrue(first.entered.wait(4))
             with self.db() as db:
                 db.execute(
                     "UPDATE jobs SET lease_until=now()-interval '1 second' WHERE client_id=%s AND tx_id=%s AND job_type='CALLBACK'",
@@ -819,6 +822,12 @@ class CompletionSuite:
 
     def test_complete_processor_parallel_io_and_bounded_duplicate(self):
         with self.http_processor() as processor:
+            # Keep provider responses blocked long enough to observe lock lifetime,
+            # independently of a loaded CI runner's scheduling latency.
+            self.process.environment.update(
+                PROCESSOR_TIMEOUT_MS="4000", PROCESSOR_LEASE_MS="6000"
+            )
+            self.process.restart()
             barriers = [processor.block_next(), processor.block_next()]
             requests = [self.fixture("charge"), self.fixture("charge")]
             keys = [self.uid(), self.uid()]
@@ -829,19 +838,33 @@ class CompletionSuite:
                 ]
                 try:
                     self.assertTrue(
-                        all(b.entered.wait(0.8) for b in barriers),
+                        all(b.entered.wait(2) for b in barriers),
                         "same-client independent charges must both enter processor before either is released",
                     )
+                    # Background workers may legitimately open short transactions.
+                    # Reject a transaction that survives across the provider barrier,
+                    # rather than a random instantaneous snapshot of unrelated work.
+                    with self.db() as db:
+                        boundary = db.execute("SELECT clock_timestamp()").fetchone()[0]
+                    time.sleep(0.15)
                     with self.db() as db:
                         active = db.execute(
-                            "SELECT count(*) FROM pg_stat_activity WHERE application_name=%s AND state='idle in transaction'",
-                            (self.client_id,),
-                        ).fetchone()[0]
+                            "SELECT pid FROM pg_stat_activity WHERE application_name=%s AND xact_start<=%s AND state IN ('idle in transaction','active')",
+                            (self.client_id, boundary),
+                        ).fetchall()
                         self.assertEqual(
                             active,
-                            0,
-                            "no open SQL transaction while provider HTTP is blocked",
+                            [],
+                            "no SQL transaction may span the blocked provider interval",
                         )
+                        # A lock held across HTTP would prevent this independent row
+                        # lock. Permit short worker activity, not a full provider wait.
+                        with db.transaction():
+                            db.execute("SET LOCAL lock_timeout='150ms'")
+                            db.execute(
+                                "SELECT account_id FROM accounts WHERE client_id=%s AND account_id='demo-account' AND currency='BRL' FOR UPDATE",
+                                (self.client_id,),
+                            ).fetchall()
                         self.assertEqual(
                             db.execute(
                                 "SELECT count(*) FROM intent_reservations WHERE client_id=%s AND debit_e5>0",
