@@ -669,6 +669,14 @@ class ReviewRegressionSuite:
             "/payout",
             200,
         )
+        for account in ("constructor", "toString", "__proto__"):
+            unknown = self.fixture("payout")
+            unknown["payee"]["account"]["account_id"] = account
+            self.assert_response(
+                self.client.request("POST", "/payout", unknown, idem=self.uid()),
+                "/payout",
+                400,
+            )
 
     def test_review_payment_metadata_reaches_demo_policy_and_redacts(self):
         data = self.fixture("charge")

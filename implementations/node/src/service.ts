@@ -142,7 +142,7 @@ export class Service {
       const payee = body.payee?.account?.account_id;
       if (payee === 'invalid-account' || body.payee?.document?.id === 'invalid') throw new Failure(400,'INVALID_PAYMENT_DETAILS_ERROR');
       const declines: Record<string,string> = {"inactive-account": "INACTIVE_ACCOUNT_ERROR", "fraud-account": "PAYMENT_FRAUD_ERROR", "hard-decline-account": "PAYMENT_PSP_HARD_DECLINE_ERROR", "bank-hard-account": "BANK_HARD_ERROR", "merchant-rejected-account": "MERCHANT_REJECTED", "network-error-account": "PAYMENT_NETWORK_ERROR", "psp-error-account": "PAYMENT_PSP_ERROR", "payment-error-account": "PAYMENT_ERROR"};
-      if (declines[payee]) throw new Failure(422,declines[payee]);
+      if (Object.hasOwn(declines, payee)) throw new Failure(422,declines[payee]);
       await this.account(db,payee,body.amount.currency);
     }
     const accountId = kind === 'charge' ? body.authorization?.account_id ?? 'demo-account' : body.payer.id;
