@@ -23,7 +23,7 @@ make verify DATABASE_URL=postgresql://uberpay@127.0.0.1:55432/uberpay
 | Check | Result |
 |---|---|
 | Pinned source hash, documented runtime normalization, 53 schemas, 142 references | Passed |
-| Python fixture/codec/packaging unit tests | 16 passed |
+| Python fixture/codec/packaging unit tests | 17 passed |
 | Node native unit/security tests | 14 passed |
 | Java native unit/security tests | 13 passed |
 | Go native tests with race detector | Passed; 8 native tests with subcases |

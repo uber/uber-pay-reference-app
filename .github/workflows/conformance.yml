@@ -49,8 +49,9 @@ jobs:
       - run: make conformance LANGUAGE=${{ matrix.language }}
       - name: Container clone-and-run smoke
         env:
-          POSTGRES_PORT: "55434"
+          COMPOSE_FILE: "compose.yaml:compose.ci.yaml"
         run: |
+          docker compose --profile ${{ matrix.language }} config --format json | python -c 'import json,sys; assert not json.load(sys.stdin)["services"]["db"].get("ports"), "Smoke DB must remain private to the Compose network"'
           make up LANGUAGE=${{ matrix.language }}
           python - <<'PYCODE'
           import time, urllib.request
@@ -66,6 +67,8 @@ jobs:
           make demo LANGUAGE=${{ matrix.language }}
       - name: Stop smoke containers
         if: always()
+        env:
+          COMPOSE_FILE: "compose.yaml:compose.ci.yaml"
         run: make down
       - uses: actions/upload-artifact@v4
         if: always()

@@ -30,3 +30,25 @@ class PackagingTest(unittest.TestCase):
         self.assertTrue((ROOT / "contracts/uberpay-openapi.json").is_file())
         self.assertTrue((ROOT / "storage/migrations/001_init.sql").is_file())
         self.assertFalse((ROOT / "context").exists())
+
+    def test_ci_smoke_database_has_no_fixed_host_port(self):
+        # !reset is the Compose override mechanism, not YAML's normal list merge.
+        class ComposeLoader(yaml.SafeLoader):
+            pass
+
+        ComposeLoader.add_constructor(
+            "!reset", lambda loader, node: loader.construct_sequence(node)
+        )
+        override = yaml.load(
+            (ROOT / "compose.ci.yaml").read_text(), Loader=ComposeLoader
+        )
+        self.assertEqual(override, {"services": {"db": {"ports": []}}})
+        ci = yaml.safe_load((ROOT / ".github/workflows/conformance.yml").read_text())
+        steps = {step.get("name"): step for step in ci["jobs"]["conformance"]["steps"]}
+        for name in ["Container clone-and-run smoke", "Stop smoke containers"]:
+            self.assertEqual(
+                steps[name]["env"]["COMPOSE_FILE"], "compose.yaml:compose.ci.yaml"
+            )
+        self.assertNotIn(
+            "55434", (ROOT / ".github/workflows/conformance.yml").read_text()
+        )
