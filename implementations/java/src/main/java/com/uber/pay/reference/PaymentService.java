@@ -277,6 +277,11 @@ final class PaymentService {
 
   private Reply create(Connection c, String kind, JsonNode b, String hash, String language)
       throws Exception {
+    String source =
+        kind.equals("charge")
+            ? b.path("source").path("id").asText()
+            : b.path("payer").path("id").asText();
+    if (source.isEmpty()) throw new ApiError(400, "VALIDATION_ERROR", "Settlement source required");
     String id = Json.text(b, "id");
     var old = transaction(c, kind, id);
     if (old != null) {
@@ -472,6 +477,8 @@ final class PaymentService {
   private Reply capture(Connection c, String path, JsonNode b) throws SQLException {
     String id = pathId(path);
     var t = authorized(c, id);
+    if (Database.str(t, "source_account_id").isEmpty())
+      throw new ApiError(400, "VALIDATION_ERROR", "Settlement source required");
     if (b.has("psp_reference")
         && !Json.text(b, "psp_reference").equals(Database.str(t, "psp_reference")))
       throw new ApiError(400, "VALIDATION_ERROR", "Reference mismatch");
@@ -586,6 +593,8 @@ final class PaymentService {
         || !Database.str(original, "psp_reference")
             .equals(Json.text(b, "original_merchant_reference")))
       throw new ApiError(400, "VALIDATION_ERROR", "Original charge is not refundable");
+    if (Database.str(original, "source_account_id").isEmpty())
+      throw new ApiError(400, "VALIDATION_ERROR", "Settlement source required");
     long n = value(b.path("amount"));
     String cur = b.path("amount").path("currency").asText();
     if (!cur.equals(Database.str(original, "currency")))

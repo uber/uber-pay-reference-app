@@ -14,7 +14,23 @@ from tools.settlement_sftp import SftpSink
 
 class OwnerSuite:
     def test_owner_partial_capture_http_releases_remainder_and_limits_refunds(self):
-        with self.http_processor():
+        with self.http_processor() as processor:
+            invalid = self.fixture("charge")
+            invalid["source"]["id"] = ""
+            key = self.uid()
+            for _ in range(2):
+                self.assert_response(
+                    self.client.request("POST", "/charge", invalid, idem=key),
+                    "/charge",
+                    400,
+                )
+            self.assertFalse(
+                any(
+                    e["resource"] == invalid["id"]
+                    for e in processor.entries(self.client_id)
+                ),
+                "known missing routing metadata must fail before a provider effect",
+            )
             token, _ = self.access()
             balance = {"account_id": "demo-account", "funding_method": "DEMO_SYNC"}
             before = self.assert_response(

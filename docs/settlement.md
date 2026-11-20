@@ -17,7 +17,8 @@ The original manual authorization is retained in `transactions.authorized_e5`;
 partial capture records only the captured amount as a monetary event.
 
 Every entry is unique by client/kind/Uber ID/event type. Missing source-account
-metadata prevents a monetary commit rather than silently losing a report row.
+metadata is rejected by native validation before processor dispatch and is also
+enforced at monetary commit, rather than silently losing a report row.
 Journal rows, batch manifests and sealed files reject UPDATE/DELETE. This captures
 new transitions after enabling the schema; it does not invent historical events
 for old disposable demo state. There is no live financial migration in this project.

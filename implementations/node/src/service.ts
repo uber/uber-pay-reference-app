@@ -257,6 +257,8 @@ export class Service {
     fp: string,
     language: string,
   ): Promise<Result> {
+    const source = kind === 'charge' ? body.source?.id : body.payer?.id;
+    if (typeof source !== 'string' || !source) throw new Failure(400);
     const profile = this.features.method(body.funding_method, body.country_iso2, body.amount?.currency);
     if (typeof body.id !== 'string' || !body.id || body.id.length > 256) throw new Failure(400);
     const old = (
@@ -413,6 +415,7 @@ export class Service {
     const tx = await this.transaction(db, 'charge', this.idFromTarget(target));
     await this.expire(db, tx, false);
     if (tx.state !== 'AUTHORIZED') throw new Failure(409, 'INVALID_CHARGE_STATE');
+    if (!tx.source_account_id) throw new Failure(400);
     const amount = this.amount(body.amount_to_capture.value);
     if (body.amount_to_capture.currency !== tx.currency) throw new Failure(400);
     if (amount > tx.amount_e5) throw new Failure(400, 'EXCEEDS_CAPTURE_LIMIT');
@@ -466,6 +469,7 @@ export class Service {
       return { status: old.response_status, body: decode(old.response_body) };
     }
     const original = await this.transaction(db, 'charge', body.original_transaction_id);
+    if (!original.source_account_id) throw new Failure(400);
     if (original.psp_reference !== body.original_merchant_reference || original.state !== 'CONFIRMED')
       throw new Failure(400);
     const amount = this.amount(body.amount.value);

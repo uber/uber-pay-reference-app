@@ -459,6 +459,13 @@ func (a *App) execute(ctx context.Context, tx pgx.Tx, op, id string, b Object, r
 }
 func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash string, language string) (Reply, error) {
 	path := "/" + kind
+	source := str(object(b["source"]), "id")
+	if kind == "payout" {
+		source = str(object(b["payer"]), "id")
+	}
+	if source == "" {
+		return a.failure(path, 400, "VALIDATION_ERROR"), nil
+	}
 	id := str(b, "id")
 	if id == "" || len(id) > 512 {
 		return a.failure(path, 400, "VALIDATION_ERROR"), nil
@@ -652,6 +659,9 @@ func (a *App) finishManual(ctx context.Context, tx pgx.Tx, op, id string, b Obje
 		}
 		return Reply{Status: 200}, a.cancelAuthorization(ctx, tx, t)
 	}
+	if t.Source == "" {
+		return a.failure(path, 400, "VALIDATION_ERROR"), nil
+	}
 	n, c, e := amount(object(b["amount_to_capture"]))
 	if e != nil || c != t.Currency {
 		return a.failure(path, 400, "VALIDATION_ERROR"), nil
@@ -709,6 +719,9 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 	}
 	if e != nil {
 		return Reply{}, e
+	}
+	if original.Source == "" {
+		return Reply{Status: 400}, nil
 	}
 	n, c, e := amount(object(b["amount"]))
 	if e != nil || c != original.Currency || original.State != "CONFIRMED" || str(b, "original_merchant_reference") != original.Ref {
