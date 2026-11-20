@@ -157,7 +157,13 @@ export class ProcessorExecutor {
             throw new Error('Invalid action URL');
         }
     }
+    if (value.amount !== undefined)
+      this.service.contract.validate(
+        value.amount,
+        this.service.contract.spec.components.schemas.CurrencyAmount,
+      );
     return {
+      amount: value.amount,
       state: value.state,
       psp_reference: value.psp_reference,
       detail: value.detail,
@@ -370,10 +376,25 @@ export class ProcessorExecutor {
           id,
         ])
       ).rows[0];
+      let updatedAmount: Json = undefined;
+      if (result.amount !== undefined) {
+        const profile = tx && decode(tx.reference_profile);
+        if (
+          kind !== 'charge' ||
+          !tx ||
+          current.response_status === null ||
+          tx.state !== 'PENDING' ||
+          result.state !== 'CONFIRMED' ||
+          profile.callback_mode !== 'deposit' ||
+          result.amount.currency !== tx.currency
+        )
+          throw new Error('Amount adjustment requires pending deposit confirmation');
+        updatedAmount = result.amount.value;
+      }
       if (current.response_status !== null) {
         if (tx && result.version > Number(current.last_provider_version)) {
           if (tx.state === 'PENDING' && result.state !== 'PENDING')
-            await s.complete(db, kind, id, result.state, result.detail);
+            await s.complete(db, kind, id, result.state, result.detail, updatedAmount);
           else if (kind === 'refund' && tx.state === 'CONFIRMED' && result.state === 'REJECTED')
             await s.reverseRefund(db, id);
           else if (tx.state === 'REJECTED' && result.state !== 'REJECTED')

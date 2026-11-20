@@ -224,6 +224,10 @@ final class ProcessorExecutor implements AutoCloseable {
             throw new ApiError(400, "invalid_request", "Invalid processor action URL");
         }
     }
+    if (value.has("amount"))
+      service.contracts.validate(
+          service.contracts.spec.path("components").path("schemas").path("CurrencyAmount"),
+          value.path("amount"));
     return value;
   }
 
@@ -502,15 +506,33 @@ final class ProcessorExecutor implements AutoCloseable {
                     kind,
                     id);
             String state = Database.str(tx, "state"), next = result.path("state").asText();
+            JsonNode updated = null;
+            if (result.has("amount")) {
+              var profile = Json.parse(Database.str(tx, "reference_profile"));
+              if (!kind.equals("charge")
+                  || !state.equals("PENDING")
+                  || !next.equals("CONFIRMED")
+                  || !profile.path("callback_mode").asText().equals("deposit")
+                  || !result
+                      .path("amount")
+                      .path("currency")
+                      .asText()
+                      .equals(Database.str(tx, "currency")))
+                throw new IllegalStateException(
+                    "Amount adjustment requires pending deposit confirmation");
+              updated = result.path("amount").path("value");
+            }
             if (state.equals("PENDING") && !next.equals("PENDING"))
               service.complete(
-                  c, kind, id, next, result.path("detail").asText("MERCHANT_REJECTED"));
+                  c, kind, id, next, result.path("detail").asText("MERCHANT_REJECTED"), updated);
             else if (kind.equals("refund") && state.equals("CONFIRMED") && next.equals("REJECTED"))
               service.reverseRefund(c, id);
             else if (!state.equals(next)
                 && !(state.equals("AUTHORIZED") && next.equals("CONFIRMED")))
               throw new IllegalStateException("Invalid provider transition");
           } else {
+            if (result.has("amount"))
+              throw new IllegalStateException("Amount update requires existing pending deposit");
             var nativeService = new PaymentService(config, db, service.contracts, new Pure(result));
             reply =
                 nativeService.executeTx(

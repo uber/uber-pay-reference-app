@@ -49,3 +49,13 @@ gateway so killing the gateway cannot erase the evidence needed for reconciliati
 A real adapter must give the same durable idempotency and lookup guarantees. Local
 conformance is not sandbox certification, and the reference never enables production
 serving merely because a processor URL is configured.
+
+## Decided capture and deposit policies
+
+One capture may be smaller than or equal to its original authorization; a success
+closes the authorization and releases the remainder. It is not multi-capture.
+For confirmation of an existing pending deposit-mode charge only, a versioned
+decision may contain `amount:{value,currency}`; it must be positive, no larger than
+the held amount, and the same currency. The gateway atomically releases unused
+hold and queues updateDeposit before confirmDeposit. The initial PENDING response
+is still replayed unchanged. Other amount adjustments fail closed for reconciliation.

@@ -18,9 +18,16 @@ Choose Node.js, Java or Go and run the shared suite. Uber Pay is the caller of t
 
 The supplied demo adapters intentionally make no external calls. Their ledger and idempotency effects share a PostgreSQL transaction; they are not a safe wrapper for an arbitrary real HTTP processor. Use the supplied native `ProcessorExecutor` and map the [private processor transport](../contracts/processor-protocol.md) to a separate processor service; it already commits intents/reservations, dispatches outside SQL and reconciles by the original provider key. [Run the independent durable fixture](processor-executor.md) before adapting it. Do not bypass the local-only mode/host gates merely to point the demo at a remote server. The runnable real-processor implementation is PSP-specific and is not bundled.
 
-## 3. Resolve the API profile with Uber Pay
+## 3. Apply the accepted reference profile
 
-Review `contracts/errata.json` with the Uber Pay integration owner: refund/lookup status vocabulary, initial payout rejection, partial capture, callback requirements and token response ambiguity. Preserve the upstream pin. Add agreed interpretations separately and run them across all language variants. Never replace the contract automatically on startup.
+All U1–U15 reference-project decisions are accepted and implemented in
+`contracts/decisions.json`; they are not a pending reference engineering backlog.
+`contracts/errata.json` describes exact differences from the unchanged upstream
+pin. U4 adds CANCELLED to the derived runtime enum; communicate/map that additive
+value when integrating a strict consumer. U5 permits one partial capture, releases
+the unused hold and limits refunds to actual captured funds. A reference choice
+does not establish that a particular deployed Uber consumer has accepted an
+extension. Preserve the upstream pin and qualify the chosen real integration.
 
 Uber onboarding must provision/confirm the developer client, PSP base URL, supported funding-method codes, source accounts, signing keys, scopes and callback environment. `DEMO_*`, demo accounts and localhost URLs are not onboarding configuration. `FUNDING_METHODS_FILE` loads an explicit per-code country/currency mapping (see `contracts/funding-methods.example.json`); it does not register a funding method with Uber. Seed only synthetic wallet/settlement accounts in those currencies for local tests. Keep alias configuration immutable until outstanding intents drain. Real sandbox connectivity remains disabled until an appropriate adapter/auth provider and review are available.
 
@@ -34,6 +41,14 @@ must replace the synthetic demo account. This is not an SCA implementation.
 
 Extend the common fixture/scenario corpus and the chosen language's unit tests with processor rejection, timeout, restart, idempotency, multiple-refund, capture/cancel and callback failures. Use meaningful request/response captures with exact amount, currency, state, Uber ID and PSP reference. Redact credentials and personal data. A passing local suite is a prerequisite—not certification by Uber.
 
-## 5. Settlement and operational readiness
+## 5. Reference settlement and operational readiness
 
-Agree on report schema, SFTP location, host keys/credentials, cadence and one-report-per-source-account expectations with Uber; those details are bilateral. Do not generate a fictional production settlement report from this sample. A live deployment needs separate privacy, security and financial review, monitoring, reconciliation, retention/erasure and incident response owned by the PSP. This repository itself has no live-traffic rollout or data migration.
+`docs/settlement.md` documents the runnable accepted U15 workflow: immutable
+confirmation/reversal journal, closed UTC reporting periods (daily default),
+one canonical JSONL file per source and checksummed manifest, sealed replay,
+no overlaps, atomic private-directory or pinned-host-key local SFTP publication.
+Transport receipt does not mean financial settlement acceptance. Configure the
+actual counterpart's format mapping, host/key/credentials and business acceptance
+process; do not claim that the reference format is Uber's bilateral file format.
+A live deployment needs its own privacy/security/financial review, retention,
+reconciliation and incident handling. The reference has no live-data migration.

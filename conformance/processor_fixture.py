@@ -82,7 +82,9 @@ class ProcessorFixture:
                 )
             ]
 
-    def set_result(self, client, key, state, *, version, detail=None, terminal=True):
+    def set_result(
+        self, client, key, state, *, version, detail=None, terminal=True, amount=None
+    ):
         with self.db() as db:
             value = json.loads(
                 db.execute(
@@ -91,6 +93,10 @@ class ProcessorFixture:
                 ).fetchone()[0]
             )
             value.update(state=state, version=version, terminal=terminal)
+            if amount is not None:
+                value["amount"] = amount
+            else:
+                value.pop("amount", None)
             if detail:
                 value["detail"] = detail
             else:
@@ -202,6 +208,7 @@ class ProcessorFixture:
                                 "DEMO_PENDING_REJECT",
                                 "DEMO_WEBVIEW",
                                 "DEMO_QR",
+                                "DEMO_DEPOSIT",
                             ):
                                 state = "PENDING"
                             if op == "initRefund" and funding == "DEMO_REFUND_REJECT":

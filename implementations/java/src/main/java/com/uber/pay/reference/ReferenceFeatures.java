@@ -25,6 +25,26 @@ final class ReferenceFeatures {
       for (var it = aliases.fields(); it.hasNext(); ) {
         var e = it.next();
         var a = e.getValue();
+        a.fieldNames()
+            .forEachRemaining(
+                k -> {
+                  if (!Set.of("method", "countries", "currencies", "callback_mode").contains(k))
+                    throw new IllegalArgumentException("Unsupported funding policy field");
+                });
+        if (a.has("callback_mode")) {
+          String mode = a.path("callback_mode").asText();
+          if (!Set.of("charge", "deposit").contains(mode))
+            throw new IllegalArgumentException("Invalid callback policy");
+          if (mode.equals("deposit")
+              && !Set.of("webview", "qr", "pending", "pending_reject")
+                  .contains(
+                      data.path("methods")
+                          .path(a.path("method").asText())
+                          .path("behavior")
+                          .asText()))
+            throw new IllegalArgumentException("Deposit callbacks require asynchronous profile");
+        }
+
         if (e.getKey().isEmpty() || !data.path("methods").has(a.path("method").asText()))
           throw new IllegalArgumentException("Invalid funding alias");
         for (String k : List.of("countries", "currencies")) {

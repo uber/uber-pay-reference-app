@@ -45,6 +45,10 @@ def main():
                 "SELECT tablename FROM pg_tables WHERE schemaname=%s", (schema,)
             ).fetchall()
             assert {row[0] for row in tables} == {
+                "settlement_entries",
+                "settlement_batches",
+                "settlement_batch_files",
+                "settlement_deliveries",
                 "accounts",
                 "transactions",
                 "operations",

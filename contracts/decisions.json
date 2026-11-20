@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "decided_on_local_date": "2026-11-20",
+  "authority": "Reference-project design authority delegated by the user: Take the best decisions as the owner and complete the implementation.",
+  "scope": "Decisions for this reference implementation, not an assertion of upstream API-owner approval or production/sandbox certification.",
+  "status": "accepted",
+  "upstream_pin_unchanged": true,
+  "decisions": [
+    {
+      "id": "U1",
+      "title": "Account.name",
+      "status": "accepted",
+      "choice": "Optional; accept the published account examples. STRICT_ACCOUNT_NAME is an explicit opt-in interoperability profile.",
+      "rationale": "Avoid rejecting valid documented account shapes because of an undefined required property.",
+      "acceptance_test": "test_review_account_examples_do_not_require_undefined_name"
+    },
+    {
+      "id": "U2",
+      "title": "Refresh token lifecycle",
+      "status": "accepted",
+      "choice": "Reusable refresh tokens, 30-day configurable lifetime, 10-minute access tokens; code reuse revokes its issued family. No rotation field in refresh responses.",
+      "rationale": "Keep the declared response shape and do not assume Uber persists replacement refresh tokens.",
+      "acceptance_test": "test_review_refresh_reusable_no_undeclared_rotation"
+    },
+    {
+      "id": "U3",
+      "title": "HTTP errors",
+      "status": "accepted",
+      "choice": "Unexpected/transient errors return retryable500 on every route, empty when undeclared, and are never cached. Authentication uses declared401, otherwise the existing declared400 mapping.",
+      "rationale": "Never misclassify infrastructure failures as final validation errors; minimize unnecessary wire-contract changes.",
+      "acceptance_test": "test_review_transient_errors_all_routes_retry_same_key"
+    },
+    {
+      "id": "U4",
+      "title": "Cancelled lookup",
+      "status": "accepted",
+      "choice": "Return200 with status CANCELLED for cancelled or expired authorizations. Add this value explicitly to the derived reference runtime schema, not the unchanged upstream pin.",
+      "rationale": "A successful lookup should describe a known terminal business state rather than return a validation error. This is a visible additive reference-contract extension.",
+      "acceptance_test": "test_review_cancelled_lookup_and_refund_of_action_payment"
+    },
+    {
+      "id": "U5",
+      "title": "Partial capture",
+      "status": "accepted",
+      "choice": "Allow one positive capture up to the authorization. Successful partial capture closes it and releases all unused hold; preserve authorized_e5 and store amount_e5 as actually captured. Refunds are capped at captured funds; another capture conflicts409.",
+      "rationale": "Support a useful payment lifecycle without ambiguous multi-capture accounting or indefinitely retained residual holds.",
+      "acceptance_test": "test_owner_partial_capture_http_releases_remainder_and_limits_refunds"
+    },
+    {
+      "id": "U6",
+      "title": "Capture decline",
+      "status": "accepted",
+      "choice": "Return422 with BANK_HARD_ERROR/BANK_SOFT_ERROR. A definitive rejected capture does not debit and releases the entire original authorization, including a partial-capture attempt. Unknown transport outcomes remain retryable500/reconciliation.",
+      "rationale": "Follow the declared error response and distinguish a known business rejection from an uncertain processor effect.",
+      "acceptance_test": "test_review_capture_declines_do_not_debit"
+    },
+    {
+      "id": "U7",
+      "title": "Cancel response",
+      "status": "accepted",
+      "choice": "An empty200 on successful cancellation.",
+      "rationale": "Follow the declared response schema; do not invent a response body.",
+      "acceptance_test": "test_manual_cancel"
+    },
+    {
+      "id": "U8",
+      "title": "Lookup identity",
+      "status": "accepted",
+      "choice": "Use Uber transaction/refund ID; merchant_reference, if supplied, must match.",
+      "rationale": "Follow parameter definitions and keep Uber identity separate from PSP reference.",
+      "acceptance_test": "test_review_reference_mismatch_and_missing_resources"
+    },
+    {
+      "id": "U9",
+      "title": "Rejected callback reference",
+      "status": "accepted",
+      "choice": "Always include an immutable PSP reference, including rejection.",
+      "rationale": "Satisfy the required schema and make reconciliation unambiguous.",
+      "acceptance_test": "test_complete_charge_reason_enum_sync_and_async"
+    },
+    {
+      "id": "U10",
+      "title": "Authorization-code result",
+      "status": "accepted",
+      "choice": "Code exchange returns refresh token; obtain access token using the refresh grant.",
+      "rationale": "Follow grant-specific schemas rather than conflicting sequence diagrams.",
+      "acceptance_test": "test_authorize_code_exchange_single_use"
+    },
+    {
+      "id": "U11",
+      "title": "Deposit callback routing",
+      "status": "accepted",
+      "choice": "Only an explicitly configured asynchronous charge funding profile with callback_mode=deposit uses confirm/cancel/updateDeposit. Ordinary charge uses chargeCallback; refund and payout keep their own callbacks. Amount may only decrease before confirmation; queue update before confirm.",
+      "rationale": "No heuristic routing by transaction ID or funding-code string. Preserve clear flow boundaries and never increase a user-approved hold without new authorization.",
+      "acceptance_test": "test_owner_provider_deposit_amount_update_is_ordered_and_bounded"
+    },
+    {
+      "id": "U12",
+      "title": "Balance request",
+      "status": "accepted",
+      "choice": "Use account_id and funding_method, with scoped account-bound bearer plus signature.",
+      "rationale": "Follow the actual operation schema and preserve ownership checks.",
+      "acceptance_test": "test_wallet_grant_and_scoped_balance"
+    },
+    {
+      "id": "U13",
+      "title": "Refund wire contract",
+      "status": "accepted",
+      "choice": "Use original_transaction_id, original_merchant_reference and CurrencyAmount. Return201 CONFIRMED/PENDING/REJECTED. Ordered late rejection reverses a confirmed refund once; unrecovered funds become explicit debt without consuming other holds.",
+      "rationale": "Follow schemas; implement a durable, auditable local reversal policy rather than contradictory SUCCEEDED/FAILED examples.",
+      "acceptance_test": "test_complete_refund_pending_rejection_and_reversal"
+    },
+    {
+      "id": "U14",
+      "title": "Payout identity conflict",
+      "status": "accepted",
+      "choice": "Changed payload under the same payout ID or key returns409 DUPLICATE_REQUEST_ERROR; identical payload replays.",
+      "rationale": "Use the declared conflict response and never repeat a payout effect to resolve a key conflict.",
+      "acceptance_test": "test_review_payout_declared_conflicts_declines_and_ledger"
+    },
+    {
+      "id": "U15",
+      "title": "Reference settlement",
+      "status": "accepted",
+      "choice": "Closed UTC periods, daily by default; immutable confirmation/reversal journal; one canonical JSONL file per source account with monetary entries (an empty period has an empty manifest) and a checksummed manifest; decimal-string signed E5 and per-currency totals. Seal once, reject overlaps, replay bytes. Atomic directory or strict-host-key local SFTP publication occurs outside SQL; transport receipt is not financial acceptance.",
+      "rationale": "Provide a complete runnable reconciliation workflow without claiming the chosen format is an Uber bilateral format or fabricating real hosts, keys, schedules, commercial netting or acceptance.",
+      "acceptance_test": "test_owner_settlement_journal_seal_and_real_sftp_delivery"
+    }
+  ]
+}

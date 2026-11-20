@@ -27,12 +27,14 @@ class ReviewRegressionSuite:
         return psycopg.connect(self.database_url, autocommit=True)
 
     def refund_request(self, original, response, **extra):
-        return dict(
-            id=self.uid(),
-            original_transaction_id=original["id"],
-            original_merchant_reference=response["psp_reference"],
-            amount=original["amount"],
-            **extra,
+        return (
+            dict(
+                id=self.uid(),
+                original_transaction_id=original["id"],
+                original_merchant_reference=response["psp_reference"],
+                amount=original["amount"],
+            )
+            | extra
         )
 
     def action_page(self, response):
@@ -606,9 +608,10 @@ class ReviewRegressionSuite:
         self.assert_response(
             self.client.request("GET", "/find-transaction?id=" + data["id"]),
             "/find-transaction",
-            400,
+            200,
             "get",
         )
+        self.assertEqual(self.lookup(data["id"])["status"], "CANCELLED")
         original, response = self.charge(funding_method="DEMO_WEBVIEW")
         self.submit_action(self.action_page(response))
         self.accepted("chargeCallback", original["id"])

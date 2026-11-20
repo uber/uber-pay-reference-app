@@ -66,8 +66,6 @@ final class DemoPspAdapter implements PspAdapter {
       throw new ApiError(400, "VALIDATION_ERROR", "Currency mismatch");
     if (c.amountE5() > c.authorizedE5())
       throw new ApiError(400, "EXCEEDS_CAPTURE_LIMIT", "Capture exceeds authorization");
-    if (c.amountE5() != c.authorizedE5())
-      throw new ApiError(400, "VALIDATION_ERROR", "Partial capture requires an agreed contract");
     if (java.util.Set.of("capture_hard", "capture_soft")
         .contains(FEATURES.method(c.fundingMethod(), "", "").path("behavior").asText()))
       return new Decision(

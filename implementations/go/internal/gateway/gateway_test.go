@@ -159,8 +159,8 @@ func TestDemoAdapterStates(t *testing.T) {
 			}
 		})
 	}
-	if _, e := adapter.Capture(context.Background(), CaptureCommand{AmountE5: 1, AuthorizedE5: 2, Currency: "BRL", AuthorizedCurrency: "BRL"}); e == nil {
-		t.Fatal("partial capture not gated")
+	if result, e := adapter.Capture(context.Background(), CaptureCommand{AmountE5: 1, AuthorizedE5: 2, Currency: "BRL", AuthorizedCurrency: "BRL", FundingMethod: "DEMO_SYNC"}); e != nil || result.State != "CONFIRMED" {
+		t.Fatal("valid partial capture rejected")
 	}
 }
 func TestLocalSafetyConfiguration(t *testing.T) {

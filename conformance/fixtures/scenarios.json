@@ -153,7 +153,7 @@
       ]
     },
     {
-      "name": "cancelled_lookup_missing_enum_is_explicit_gate",
+      "name": "cancelled_lookup_returns_terminal_state",
       "steps": [
         {
           "method": "POST",
@@ -181,7 +181,10 @@
           "path": "/find-transaction?id=${id}",
           "contract_path": "/find-transaction",
           "expect": {
-            "status": 400
+            "status": 200,
+            "body": {
+              "status": "CANCELLED"
+            }
           }
         }
       ]

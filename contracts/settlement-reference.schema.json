@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reference settlement JSONL v1 (not Uber production settlement)",
+  "$defs": {
+    "hash": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "entry": {
+      "type":"object","additionalProperties":false,
+      "required":["event_id","occurred_at","source_account_id","transaction_type","uber_id","psp_reference","event_type","currency","amount_e5"],
+      "properties": {
+        "event_id":{"$ref":"#/$defs/hash"},
+        "occurred_at":{"type":"string","format":"date-time","pattern":"Z$"},
+        "source_account_id":{"type":"string","minLength":1},
+        "transaction_type":{"enum":["charge","refund","payout"]},
+        "uber_id":{"type":"string","minLength":1},
+        "psp_reference":{"type":"string","minLength":1},
+        "event_type":{"enum":["CONFIRMED","REFUND_REVERSED"]},
+        "currency":{"type":"string","pattern":"^[A-Z]{3}$"},
+        "amount_e5":{"type":"string","pattern":"^-?[1-9][0-9]*$","description":"Nonzero signed E5 bounded to +/-9223372036854775807; validate exact range after parsing."}
+      }
+    },
+    "manifest": {
+      "type":"object","additionalProperties":false,
+      "required":["format_version","batch_id","client_id","period_start","period_end","money_encoding","financial_acceptance","files"],
+      "properties": {
+        "format_version":{"const":"uberpay-reference-settlement-jsonl-v1"},
+        "batch_id":{"$ref":"#/$defs/hash"},
+        "client_id":{"type":"string","minLength":1},
+        "period_start":{"type":"string","format":"date-time","pattern":"Z$"},
+        "period_end":{"type":"string","format":"date-time","pattern":"Z$"},
+        "money_encoding":{"type":"string"},
+        "financial_acceptance":{"const":false},
+        "files":{"type":"array","items":{
+          "type":"object","additionalProperties":false,
+          "required":["source_account_id","filename","sha256","entries","net_e5_by_currency"],
+          "properties":{
+            "source_account_id":{"type":"string","minLength":1},
+            "filename":{"type":"string","pattern":"^source-[a-f0-9]{64}\\.jsonl$"},
+            "sha256":{"$ref":"#/$defs/hash"},
+            "entries":{"type":"integer","minimum":1},
+            "net_e5_by_currency":{"type":"object","propertyNames":{"pattern":"^[A-Z]{3}$"},"additionalProperties":{"type":"string","pattern":"^(0|-?[1-9][0-9]*)$"}}
+          }
+        }}
+      }
+    }
+  },
+  "oneOf":[{"$ref":"#/$defs/entry"},{"$ref":"#/$defs/manifest"}]
+}

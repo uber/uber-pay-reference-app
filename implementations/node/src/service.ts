@@ -416,14 +416,13 @@ export class Service {
     const amount = this.amount(body.amount_to_capture.value);
     if (body.amount_to_capture.currency !== tx.currency) throw new Failure(400);
     if (amount > tx.amount_e5) throw new Failure(400, 'EXCEEDS_CAPTURE_LIMIT');
-    if (amount !== tx.amount_e5) throw new Failure(400);
     if (body.psp_reference && body.psp_reference !== tx.psp_reference) throw new Failure(400);
     const capture = await this.adapter.capture(
       { ...body, funding_method: tx.funding_method },
       hash(`capture:${tx.id}`),
     );
     if (capture.state === 'REJECTED') {
-      await this.ledger(db, tx.account_id, tx.currency, amount, 0n);
+      await this.ledger(db, tx.account_id, tx.currency, tx.amount_e5, 0n);
       await this.setState(db, tx, 'REJECTED');
       return this.error(
         this.contract.operation('post', '/charge/{id}/capture'),
@@ -432,7 +431,13 @@ export class Service {
       );
     }
     if (capture.state !== 'CONFIRMED') throw new Error('Unexpected capture decision');
-    await this.ledger(db, tx.account_id, tx.currency, 0n, -amount);
+    await this.ledger(db, tx.account_id, tx.currency, tx.amount_e5 - amount, -amount);
+    await db.query('UPDATE transactions SET amount_e5=$4 WHERE client_id=$1 AND kind=$2 AND id=$3', [
+      this.config.clientId,
+      tx.kind,
+      tx.id,
+      amount.toString(),
+    ]);
     await this.setState(db, tx, 'CONFIRMED');
     return { status: 200 };
   }
@@ -522,7 +527,6 @@ export class Service {
     );
     if (!tx) throw new Failure(404);
     await this.expire(db, tx, false);
-    if (tx.state === 'CANCELLED') throw new Failure(400);
     const body: Json = {
       id: tx.id,
       merchant_reference: tx.psp_reference,

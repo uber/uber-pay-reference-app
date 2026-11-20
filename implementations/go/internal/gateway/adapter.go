@@ -87,8 +87,8 @@ func (DemoPspAdapter) Payout(_ context.Context, c PaymentCommand) (ProviderResul
 	return demoDecision(c, true)
 }
 func (DemoPspAdapter) Capture(_ context.Context, c CaptureCommand) (ProviderResult, error) {
-	if c.Currency != c.AuthorizedCurrency || c.AmountE5 != c.AuthorizedE5 {
-		return ProviderResult{}, errors.New("only exact full capture is available in this reference profile")
+	if c.Currency != c.AuthorizedCurrency || c.AmountE5 <= 0 || c.AmountE5 > c.AuthorizedE5 {
+		return ProviderResult{}, errors.New("capture must not exceed the authorization")
 	}
 	f, e := LoadFeatures()
 	if e != nil {

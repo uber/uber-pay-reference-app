@@ -47,14 +47,14 @@ The harness launches native processes, signs the exact request bytes, validates 
 | Partner-hosted operations | Coverage |
 |---|---|
 | `POST /charge` | Sync confirmed/rejected, pending, WebView/QR action, manual authorization |
-| `POST /charge/{id}/capture`, `POST /charge/{id}/cancel` | Full capture/cancel; expiry and concurrent-state protection |
+| `POST /charge/{id}/capture`, `POST /charge/{id}/cancel` | Single full/partial capture with unused-hold release; cancel/expiry and concurrent-state protection |
 | `GET /find-transaction` | Charge/refund lookup with original Uber ID |
 | `POST /refund` | Full/partial refund, pending/rejected completion and ordered late reversal |
 | `POST /balance` | Exact E5 available/total and optional itemized balance; signed request **and** scoped bearer |
 | `POST /payout` | Sync or pending payout and callback |
 | `GET /authorize`, `POST /token` | Explicit demo consent; code, refresh and wallet grants |
 
-Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows, not an automatic routing rule for ordinary charges. Real routing remains pending Uber confirmation (U11).
+Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows, not an automatic routing rule for ordinary charges. Accepted U11 selects routing explicitly per asynchronous funding profile; it is not inferred from funding-code strings.
 
 Demo profiles include sync/pending/reject, WebView/QR, capture hard/soft decline, refund pending rejection/late reversal, itemized meal-voucher balance, and a separate deposit flow. `contracts/reference-features.json` declares every profile plus triggers for all 14 charge and 10 payout callback reasons. These are local controls, **not** Uber-assigned funding codes. Demo accounts use BRL and begin with synthetic E5 balances. The HTTP contract uses integer E5 amounts, never floating-point money.
 
@@ -77,9 +77,11 @@ The clone is self-contained: the API pin and documented local compatibility prof
 
 ## Adapting this reference to your PSP
 
-Read [the integration guide](docs/psp-integration.md) and [architecture](docs/architecture.md). Use the native [durable HTTP processor executor](docs/processor-executor.md) to exercise the network boundary against an independent local fixture, then map your actual processor/wallet systems to that boundary. Agree on contract errata and callback routing with Uber before external effects. There is intentionally no runnable real-money adapter, fabricated user authentication, production deployment or automatic settlement export.
+Read [the integration guide](docs/psp-integration.md) and [architecture](docs/architecture.md). Use the native [durable HTTP processor executor](docs/processor-executor.md) to exercise the network boundary against an independent local fixture, then map your actual processor/wallet systems to that boundary. Follow the accepted reference profile and map it explicitly to the actual counterparty contract before external effects. There is intentionally no runnable real-money adapter, fabricated user authentication, production deployment or a real-counterparty settlement agreement.
 
-Several upstream examples disagree with their declared schemas. This repository records the differences in [contracts/errata.json](contracts/errata.json); it does not claim Uber approved its local profile. Partial capture and ambiguous cancelled lookup behavior are gated/documented, not silently invented.
+U1–U15 are accepted reference-project choices in [the decision register](contracts/decisions.json), with rationale and executable evidence. The derived runtime explicitly adds CANCELLED lookup and supports one partial capture with remainder release; the upstream pin is unchanged. Project design acceptance is not Uber sandbox/production certification. See [owner decisions](docs/owner-decisions.md).
+
+The [reference settlement workflow](docs/settlement.md) seals immutable per-source JSONL reports and a checksummed manifest, then publishes atomically to a private directory or strict-host-key loopback SFTP. Upload receipts are not financial acceptance or a claim that Uber uses this reference format.
 
 This is an intentional replacement of the old deposit-only UI. Its source is recoverable at Git commit `100c5f8`; it is not served or supported by version 2. No live data migration is involved.
 

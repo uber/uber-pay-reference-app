@@ -3,3 +3,4 @@ jsonschema[format-nongpl]==4.26.0
 psycopg[binary]==3.3.9
 
 PyYAML==6.0.3
+paramiko==5.1.0

@@ -85,7 +85,7 @@ change. There is no automatic key rotation or hot configuration migration.
   an Uber-approved production collections policy.
 - `DEMO_DEPOSIT` is a distinct synthetic flow: confirmation/cancellation callbacks,
   with an optional **reduced** amount update delivered before confirmation. Modern
-  ordinary charges still use chargeCallback. Real callback routing is pending U11.
+  ordinary charges still use chargeCallback. Assigned funding profiles explicitly select callback_mode under accepted U11.
 - Balance uses the reference wallet ledger, not a remote production balance source.
   Resource-owner login, KYC, real routing and conversion rules remain PSP supplied.
 - Commands may include sensitive operation input, so they are encrypted at rest in
@@ -108,3 +108,19 @@ outside disposable conformance runs.
 These tests establish the reference boundary, not exactly-once effects in an
 arbitrary real processor. An adopter must supply durable downstream idempotency
 and authoritative lookup, or keep uncertain outcomes quarantined.
+
+### Accepted lifecycle additions
+
+A manual charge permits one positive full/partial capture up to the original
+authorization; successful capture releases the unused hold and closes the
+authorization. The original is authorized_e5 and amount_e5 becomes captured money.
+A subsequent capture conflicts409; refunds cannot exceed the captured amount.
+Known declined partial capture releases the entire original hold, not just the
+requested captured amount. Unknown provider outcomes remain protected.
+
+For an existing pending charge whose frozen funding profile explicitly selects
+deposit callbacks, a final CONFIRMED processor decision/event may include
+`amount:{value,currency}`. Currency must match, and the positive amount may only
+decrease. Finalization releases unused hold, records actual amount, and enqueues
+updateDeposit before confirmDeposit. Increases or ordinary-charge adjustments
+are quarantined without changing the ledger or inventing a successful callback.

@@ -25,25 +25,25 @@ make verify DATABASE_URL=postgresql://uberpay@127.0.0.1:55432/uberpay
 | Check | Result |
 |---|---|
 | Pinned source hash, documented runtime normalization, 53 schemas, 142 references | Passed |
-| Python fixture/codec/packaging unit tests | 21 passed |
+| Python fixture/codec/packaging unit tests | 29 passed |
 | Node native unit/security tests | 14 passed |
 | Java native unit/security tests | 13 passed |
 | Go native tests with race detector | Passed; 8 native tests with subcases |
-| Independent Node wire conformance | 99 passed, 0 failed, 0 skipped |
-| Independent Java wire conformance | 99 passed, 0 failed, 0 skipped |
-| Independent Go wire conformance | 99 passed, 0 failed, 0 skipped |
+| Independent Node wire conformance | 102 passed, 0 failed, 0 skipped |
+| Independent Java wire conformance | 102 passed, 0 failed, 0 skipped |
+| Independent Go wire conformance | 102 passed, 0 failed, 0 skipped |
 | Python lint/format and Go vet | Passed |
 | PostgreSQL migration up/repeated-up/down in rollback-only isolated schema | Passed |
 
-The 297 wire cases exercise all 32 declared operation/status pairs per language. They include exact integers above 2^53, raw signature failures, concurrent duplicates, capture/cancel races, OAuth consent and grant reuse, refund limits, all six callbacks, transient/permanent failures, retry exhaustion and recovery after SIGKILL. They use synthetic funds only. JSON/JUnit reports and native server logs are in ignored `.artifacts/conformance/`; the current aggregate log is `.artifacts/completion-release-verify.log`.
+The 306 wire cases exercise all 32 declared operation/status pairs per language. They include exact integers above 2^53, raw signature failures, concurrent duplicates, capture/cancel races, OAuth consent and grant reuse, refund limits, all six callbacks, transient/permanent failures, retry exhaustion and recovery after SIGKILL. They use synthetic funds only. JSON/JUnit reports and native server logs are in ignored `.artifacts/conformance/`; the current aggregate log is `.artifacts/owner-final-verify.log`.
 
 ## Not verified or not bundled
 
 - Docker Engine/Compose are unavailable on the implementation host. Container builds and clone-and-run smoke are exercised in all three CI jobs; consult the PR checks for the current commit rather than inferring container results from local tests.
 - No real Uber sandbox call or live transaction was made. No Uber onboarding/compatibility approval is claimed.
-- No real PSP processor, real resource-owner login/consent, production serving mode, or settlement-file implementation is bundled. Non-local modes fail closed. The durable native HTTP executor and independent synthetic processor are bundled and tested, but intentionally local-host restricted. A PSP must map the private transport to its actual processor and supply real identity, secrets, financial controls and onboarding; never put a network call inside the in-process demo transaction.
-- The local contract interpretations in `contracts/errata.json` require Uber-owner review before external qualification. Refresh-token rotation policies and real retention/access/financial controls remain a PSP responsibility, not a promise of the examples.
+- No real PSP processor, real resource-owner login/consent, production serving mode, or actual counterparty settlement acceptance is bundled. Non-local modes fail closed. The durable native HTTP executor and independent synthetic processor are bundled and tested, but intentionally local-host restricted. A PSP must map the private transport to its actual processor and supply real identity, secrets, financial controls and onboarding; never put a network call inside the in-process demo transaction.
+- U1–U15 reference-project choices are accepted in contracts/decisions.json, with implemented behavior and named tests. U4 is an explicit additive runtime extension, not a change to the upstream pin. External qualification and real retention/access/financial controls remain deployment obligations, not claims established by a project decision.
 
 ## Review qualification
 
-The original 53-scenario pass did not establish complete behavioral conformance. The follow-up adds an independent 32/32 declared-status release gate and regressions for transient faults, backend loss, real action pages, callback 401/revocation, cross-account operations, capture/payout declines, token families, payout ledger direction and metadata handling. The completion adds all14 charge and10 payout callback reasons, native HTTP intent/reconciliation and crash tests, refund reversal/debt, deposit amount/callback ordering, itemized balances, localization, assigned-code configuration, ten versioned JSON workflows and multi-worker fencing. U1–U15, real processor/identity integration, production controls and bilateral settlement remain external gates, as itemized in `review-follow-up.md`. Use the current `.artifacts/conformance/summary.json` and CI for exact scenario counts and results; do not infer them from this narrative.
+The original 53-scenario pass did not establish complete behavioral conformance. The follow-up adds an independent 32/32 declared-status release gate and regressions for transient faults, backend loss, real action pages, callback 401/revocation, cross-account operations, capture/payout declines, token families, payout ledger direction and metadata handling. The completion adds all14 charge and10 payout callback reasons, native HTTP intent/reconciliation and crash tests, refund reversal/debt, deposit amount/callback ordering, itemized balances, localization, assigned-code configuration, ten versioned JSON workflows and multi-worker fencing. The owner-decision completion adds CANCELLED lookup, one partial capture with remainder release/refund cap, provider-driven deposit reductions, and immutable per-source settlement export plus real local SFTP delivery/fault tests. All U1–U15 reference decisions are closed; real processor/identity integration, production controls and actual counterparty acceptance remain deployment prerequisites. Use the current `.artifacts/conformance/summary.json` and CI for exact scenario counts and results; do not infer them from this narrative.

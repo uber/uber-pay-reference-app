@@ -23,6 +23,20 @@ def normalized(source):
                 param["required"] = True
                 param["schema"].pop("required", None)
     result["components"]["schemas"]["Account"]["required"].remove("name")
+    lookup = result["paths"]["/find-transaction"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["properties"]["status"]
+    lookup["enum"].append("CANCELLED")
+    lookup["description"] += (
+        "\n* `CANCELLED`: authorization cancelled or expired without capture (reference profile U4 extension)"
+    )
+    result["info"]["x-reference-profile"] = {
+        "decisions": "contracts/decisions.json",
+        "status": "accepted for reference project",
+        "derived_runtime": True,
+        "upstream_pin_unchanged": True,
+        "additive_extensions": ["U4 CANCELLED lookup"],
+    }
     return result
 
 
@@ -44,7 +58,7 @@ def main():
     )
     runtime = json.loads((ROOT / "contracts/runtime.json").read_text())
     assert runtime == normalized(source), (
-        "runtime.json differs from documented local normalization (including provisional U1)"
+        "runtime.json differs from documented local normalization (including decided reference U1/U4)"
     )
     refs = []
 

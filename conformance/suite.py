@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 from .review_suite import ReviewRegressionSuite
 from .completion_suite import CompletionSuite
+from .owner_suite import OwnerSuite
 from . import contract
 from .wire import eventually
 
@@ -30,7 +31,9 @@ class HiddenForm(HTMLParser):
             self.fields[attrs["name"]] = attrs.get("value", "")
 
 
-class GatewaySuite(CompletionSuite, ReviewRegressionSuite, unittest.TestCase):
+class GatewaySuite(
+    OwnerSuite, CompletionSuite, ReviewRegressionSuite, unittest.TestCase
+):
     client = mock = process = None
     client_id = "demo-client"
     client_secret = "demo-secret"
@@ -289,7 +292,7 @@ class GatewaySuite(CompletionSuite, ReviewRegressionSuite, unittest.TestCase):
             results = [capture.result(), cancel.result()]
         self.assertEqual(sorted(r.status for r in results), [200, 409])
 
-    def test_partial_capture_gated(self):
+    def test_partial_capture_releases_remainder(self):
         data, _ = self.charge(capture_method="MANUAL")
         r = self.client.request(
             "POST",
@@ -297,7 +300,28 @@ class GatewaySuite(CompletionSuite, ReviewRegressionSuite, unittest.TestCase):
             {"amount_to_capture": {"value": 1, "currency": "BRL"}},
             idem=self.uid(),
         )
-        self.assert_response(r, "/charge/{id}/capture", 400)
+        self.assert_response(r, "/charge/{id}/capture", 200)
+        found = self.lookup(data["id"])
+        self.assertEqual(found["status"], "CONFIRMED")
+        self.assertEqual(found["amount"], {"value": 1, "currency": "BRL"})
+        with self.db() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT authorized_e5,amount_e5 FROM transactions WHERE client_id=%s AND kind='charge' AND id=%s",
+                    (self.client_id, data["id"]),
+                ).fetchone(),
+                (data["amount"]["value"], 1),
+            )
+        self.assert_response(
+            self.client.request(
+                "POST",
+                f"/charge/{data['id']}/capture",
+                {"amount_to_capture": {"value": 1, "currency": "BRL"}},
+                idem=self.uid(),
+            ),
+            "/charge/{id}/capture",
+            409,
+        )
 
     def test_expired_authorization(self):
         data, _ = self.charge(capture_method="MANUAL")

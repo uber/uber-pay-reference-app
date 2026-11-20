@@ -17,3 +17,15 @@ Report a vulnerability privately to the repository maintainer/owning team. Do no
 All supported gateways bound SQL lock wait to 1500ms and statements to 5000ms. Authentication and persisted-account ownership checks precede replay. Active and idle Node connection failures are handled without unhandled error events. Browser action capabilities are256 random bits, scoped to a WAITING job, CSRF-protected, single-use and expiring; GET never mints authority from an Uber transaction ID. Logs omit raw errors, credentials, merchant secrets and personal request fields. Redirects use exact configured URIs. Optional quoted signature created/expires are additional bounds only and cannot replace/extend signed Date freshness.
 
 Only synthetic fixtures may be used locally. Merchant secrets/KYC/customer data are transient in-process adapter inputs in the default mode and never logged. HTTP mode must recover after a crash, so it retains the operation command as AES-256-GCM ciphertext under an explicitly configured persistent 256-bit key; the command includes a pinned funding-configuration hash and authenticated client/intent context. Do not discard or rotate that key/configuration while intents are outstanding. The independent processor fixture stores hashes and synthetic routing/decisions, not raw commands. The disposable database otherwise contains readable IDs, response bodies and states; it is not production encrypted storage. Source settlement ID, payee routing ID and order ID remain in the disposable local database until the developer deletes the volume; there is no automatic production TTL/erasure service. A PSP must specify purpose, encryption, access control, approved retention, erasure, KYC and audit policy before external use.
+
+## Accepted reference decisions and settlement output
+
+Design acceptance of U1–U15 is not external platform certification. The upstream
+pin is unchanged; CANCELLED is explicitly labeled a reference runtime extension.
+Settlement exports use synthetic identifiers and decimal-string exact amounts,
+not KYC or credentials. Private output directories/files, immutable/checksummed
+batches, strict pinned-host-key loopback SFTP and explicit private key credentials
+protect the reference transfer. Encrypted keys can use a passphrase environment
+variable; agent/password fallback and automatic host-key acceptance are disabled.
+An upload receipt is not business acceptance, and file permissions do not replace
+production at-rest encryption/retention or other partner deployment controls.

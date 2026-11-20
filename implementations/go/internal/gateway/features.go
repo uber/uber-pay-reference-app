@@ -49,6 +49,22 @@ func LoadFeatures() (ReferenceFeatures, error) {
 	}
 	for code, value := range f.Aliases {
 		a := object(value)
+		for key := range a {
+			if key != "method" && key != "countries" && key != "currencies" && key != "callback_mode" {
+				return f, errors.New("unsupported funding policy field")
+			}
+		}
+		if mode, exists := a["callback_mode"]; exists {
+			if mode != "charge" && mode != "deposit" {
+				return f, errors.New("invalid callback policy")
+			}
+			if mode == "deposit" {
+				behavior := str(object(object(f.Data["methods"])[str(a, "method")]), "behavior")
+				if behavior != "webview" && behavior != "qr" && behavior != "pending" && behavior != "pending_reject" {
+					return f, errors.New("deposit callback policy requires asynchronous profile")
+				}
+			}
+		}
 		if code == "" || object(f.Data["methods"])[str(a, "method")] == nil {
 			return f, errors.New("invalid funding alias")
 		}

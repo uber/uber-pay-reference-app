@@ -176,10 +176,10 @@ class CoreTest {
         ApiError.class,
         () ->
             a.capture(new PspAdapter.CaptureCommand("AUTHORIZED", 10, "BRL", 11, "BRL"), "stable"));
-    assertThrows(
-        ApiError.class,
-        () ->
-            a.capture(new PspAdapter.CaptureCommand("AUTHORIZED", 10, "BRL", 1, "BRL"), "stable"));
+    assertEquals(
+        "CONFIRMED",
+        a.capture(new PspAdapter.CaptureCommand("AUTHORIZED", 10, "BRL", 1, "BRL"), "stable")
+            .state());
     assertEquals(
         "CANCELLED", a.cancel(new PspAdapter.CancelCommand("AUTHORIZED"), "stable").state());
     assertThrows(

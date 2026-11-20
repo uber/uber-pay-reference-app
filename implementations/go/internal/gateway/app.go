@@ -449,9 +449,6 @@ func (a *App) execute(ctx context.Context, tx pgx.Tx, op, id string, b Object, r
 			return Reply{}, err
 		}
 		t.State = provider.State
-		if t.State == "CANCELLED" {
-			return Reply{Status: 400}, nil
-		}
 		out := Object{"id": t.ID, "merchant_reference": t.Ref, "status": t.State, "amount": Object{"value": t.Amount, "currency": t.Currency}}
 		if t.State == "CONFIRMED" {
 			out["confirmed_at"] = t.Updated.UTC().Format(time.RFC3339Nano)
@@ -662,9 +659,6 @@ func (a *App) finishManual(ctx context.Context, tx pgx.Tx, op, id string, b Obje
 	if n > t.Amount {
 		return a.failure(path, 400, "EXCEEDS_CAPTURE_LIMIT"), nil
 	}
-	if n != t.Amount {
-		return a.failure(path, 400, "VALIDATION_ERROR"), nil
-	}
 	result, err := a.Adapter.Capture(ctx, CaptureCommand{FundingMethod: t.Funding, ID: id, ProviderKey: fingerprint(a.Config.ClientID + ":capture:" + id), Currency: c, AuthorizedCurrency: t.Currency, AmountE5: n, AuthorizedE5: t.Amount})
 	if err != nil {
 		return Reply{}, err
@@ -681,10 +675,10 @@ func (a *App) finishManual(ctx context.Context, tx pgx.Tx, op, id string, b Obje
 	if result.State != "CONFIRMED" {
 		return Reply{}, errors.New("unexpected capture decision")
 	}
-	if e = adjust(ctx, tx, a.Config.ClientID, t.Account, t.Currency, 0, -n); e != nil {
+	if e = adjust(ctx, tx, a.Config.ClientID, t.Account, t.Currency, t.Amount-n, -n); e != nil {
 		return Reply{}, e
 	}
-	_, e = tx.Exec(ctx, "UPDATE transactions SET state='CONFIRMED',updated_at=now() WHERE client_id=$1 AND kind='charge' AND id=$2", a.Config.ClientID, id)
+	_, e = tx.Exec(ctx, "UPDATE transactions SET state='CONFIRMED',amount_e5=$3,updated_at=now() WHERE client_id=$1 AND kind='charge' AND id=$2", a.Config.ClientID, id, n)
 	return Reply{Status: 200}, e
 }
 func (a *App) cancelAuthorization(ctx context.Context, tx pgx.Tx, t Transaction) error {

@@ -523,5 +523,6 @@
       "invalid_request": "Solicitação inválida",
       "amount": "Valor (E5)"
     }
-  }
+  },
+  "policy_version": "2026-11-20-owner-decisions"
 }

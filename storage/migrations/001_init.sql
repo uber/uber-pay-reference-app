@@ -181,3 +181,69 @@ ALTER TABLE provider_intents ADD COLUMN IF NOT EXISTS last_provider_version BIGI
 ALTER TABLE provider_intents ADD COLUMN IF NOT EXISTS failures INTEGER NOT NULL DEFAULT 0;
 
 ALTER TABLE provider_intents ADD COLUMN IF NOT EXISTS provider_reference TEXT;
+
+-- Reference decision U5: one full/partial capture; preserve original authorization.
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS authorized_e5 BIGINT CHECK(authorized_e5>0);
+CREATE OR REPLACE FUNCTION reference_authorized_amount() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.kind='charge' AND NEW.capture_method='MANUAL' THEN NEW.authorized_e5:=NEW.amount_e5;END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS transaction_authorized_amount ON transactions;
+CREATE TRIGGER transaction_authorized_amount BEFORE INSERT ON transactions FOR EACH ROW EXECUTE FUNCTION reference_authorized_amount();
+
+-- U15 reference settlement journal. Events are immutable and are not bank settlement.
+CREATE TABLE IF NOT EXISTS settlement_entries (
+ client_id TEXT NOT NULL, tx_kind TEXT NOT NULL, tx_id TEXT NOT NULL,
+ event_type TEXT NOT NULL CHECK(event_type IN ('CONFIRMED','REFUND_REVERSED')),
+ source_account_id TEXT NOT NULL, psp_reference TEXT NOT NULL, currency TEXT NOT NULL,
+ amount_e5 BIGINT NOT NULL CHECK(amount_e5<>0), occurred_at TIMESTAMPTZ NOT NULL,
+ PRIMARY KEY(client_id,tx_kind,tx_id,event_type)
+);
+CREATE INDEX IF NOT EXISTS settlement_entries_window ON settlement_entries(client_id,occurred_at);
+CREATE TABLE IF NOT EXISTS settlement_batches (
+ id TEXT PRIMARY KEY, client_id TEXT NOT NULL, period_start TIMESTAMPTZ NOT NULL, period_end TIMESTAMPTZ NOT NULL,
+ format_version TEXT NOT NULL, manifest TEXT NOT NULL, manifest_sha256 TEXT NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(client_id,period_start,period_end,format_version), CHECK(period_end>period_start)
+);
+CREATE TABLE IF NOT EXISTS settlement_batch_files (
+ batch_id TEXT NOT NULL REFERENCES settlement_batches(id), source_account_id TEXT NOT NULL,
+ filename TEXT NOT NULL, content TEXT NOT NULL, sha256 TEXT NOT NULL, entry_count BIGINT NOT NULL,
+ PRIMARY KEY(batch_id,source_account_id),UNIQUE(batch_id,filename)
+);
+CREATE TABLE IF NOT EXISTS settlement_deliveries (
+ batch_id TEXT NOT NULL REFERENCES settlement_batches(id), destination_hash TEXT NOT NULL,
+ manifest_sha256 TEXT NOT NULL, receipt JSONB NOT NULL, delivered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(batch_id,destination_hash)
+);
+CREATE OR REPLACE FUNCTION reference_settlement_entry() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE t transactions%ROWTYPE; event TEXT; signed_amount BIGINT;
+BEGIN
+ IF NEW.state='CONFIRMED' AND (TG_OP='INSERT' OR OLD.state<>'CONFIRMED') THEN event:='CONFIRMED';
+ ELSIF TG_OP='UPDATE' AND NEW.kind='refund' AND OLD.state='CONFIRMED' AND NEW.state='REJECTED' THEN event:='REFUND_REVERSED';
+ ELSE RETURN NULL;END IF;
+ -- Shared until commit: a closing export's exclusive lock waits for all earlier
+ -- producers. New producers timestamp AFTER this lock, so no late old-period row
+ -- can slip behind a sealed batch. No HTTP runs while holding this lock.
+ PERFORM pg_advisory_xact_lock_shared(hashtextextended('settlement|'||NEW.client_id,0));
+ SELECT * INTO STRICT t FROM transactions WHERE client_id=NEW.client_id AND kind=NEW.kind AND id=NEW.id;
+ IF t.source_account_id IS NULL OR t.source_account_id='' THEN
+  RAISE EXCEPTION 'Settlement source metadata required' USING ERRCODE='23514';
+ END IF;
+ signed_amount:=CASE WHEN t.kind='refund' AND event='CONFIRMED' THEN t.amount_e5 ELSE -t.amount_e5 END;
+ INSERT INTO settlement_entries(client_id,tx_kind,tx_id,event_type,source_account_id,psp_reference,currency,amount_e5,occurred_at)
+ VALUES(t.client_id,t.kind,t.id,event,t.source_account_id,t.psp_reference,t.currency,signed_amount,clock_timestamp())
+ ON CONFLICT DO NOTHING;
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS transaction_settlement_entry ON transactions;
+CREATE CONSTRAINT TRIGGER transaction_settlement_entry AFTER INSERT OR UPDATE ON transactions
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reference_settlement_entry();
+CREATE OR REPLACE FUNCTION reference_immutable_settlement() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'Sealed financial evidence is immutable' USING ERRCODE='23514';END $$;
+DROP TRIGGER IF EXISTS immutable_settlement_entries ON settlement_entries;
+CREATE TRIGGER immutable_settlement_entries BEFORE UPDATE OR DELETE ON settlement_entries FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();
+DROP TRIGGER IF EXISTS immutable_settlement_batches ON settlement_batches;
+CREATE TRIGGER immutable_settlement_batches BEFORE UPDATE OR DELETE ON settlement_batches FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();
+DROP TRIGGER IF EXISTS immutable_settlement_files ON settlement_batch_files;
+CREATE TRIGGER immutable_settlement_files BEFORE UPDATE OR DELETE ON settlement_batch_files FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();

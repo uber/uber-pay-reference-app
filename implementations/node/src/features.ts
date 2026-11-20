@@ -25,6 +25,16 @@ export class ReferenceFeatures {
     this.aliases = aliases ? decode(readFileSync(resolve(root, aliases))) : {};
     for (const [code, alias] of Object.entries(this.aliases) as [string, Json][]) {
       if (
+        Object.keys(alias).some((k) => !['method', 'countries', 'currencies', 'callback_mode'].includes(k)) ||
+        (alias.callback_mode !== undefined && !['charge', 'deposit'].includes(alias.callback_mode))
+      )
+        throw new Error('Invalid funding callback policy');
+      if (
+        alias.callback_mode === 'deposit' &&
+        !['webview', 'qr', 'pending', 'pending_reject'].includes(this.data.methods[alias.method]?.behavior)
+      )
+        throw new Error('Deposit callback policy requires an asynchronous funding profile');
+      if (
         !code ||
         !Object.hasOwn(this.data.methods, alias.method) ||
         !alias.countries?.length ||

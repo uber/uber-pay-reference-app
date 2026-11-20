@@ -230,6 +230,11 @@ func (a *App) processorDecision(op string, v Object) (Object, error) {
 			}
 		}
 	}
+	if amount, ok := v["amount"]; ok {
+		if e := a.Contract.Validate(Object{"$ref": "#/components/schemas/CurrencyAmount"}, amount); e != nil {
+			return nil, e
+		}
+	}
 	return v, nil
 }
 func (a *App) processorExecute(r *http.Request, pattern, op, id string, b Object) (Reply, error) {
@@ -503,8 +508,16 @@ func (a *App) processorFinalize(o, result Object) (Reply, error) {
 				return Reply{}, err
 			}
 			state := str(result, "state")
+			var updated any
+			if amount, ok := result["amount"]; ok {
+				profile, _ := DecodeJSON([]byte(t.Profile))
+				if kind != "charge" || t.State != "PENDING" || state != "CONFIRMED" || str(object(profile), "callback_mode") != "deposit" || str(object(amount), "currency") != t.Currency {
+					return Reply{}, errors.New("amount adjustment requires pending deposit confirmation")
+				}
+				updated = object(amount)["value"]
+			}
 			if t.State == "PENDING" && state != "PENDING" {
-				e = a.completeTransaction(ctx, tx, t, state, str(result, "detail"), nil)
+				e = a.completeTransaction(ctx, tx, t, state, str(result, "detail"), updated)
 			} else if kind == "refund" && t.State == "CONFIRMED" && state == "REJECTED" {
 				e = a.reverseRefund(ctx, tx, id)
 			} else if t.State != state && !(t.State == "AUTHORIZED" && state == "CONFIRMED") {
@@ -515,6 +528,9 @@ func (a *App) processorFinalize(o, result Object) (Reply, error) {
 			}
 		}
 	} else {
+		if _, ok := result["amount"]; ok {
+			return Reply{}, errors.New("amount update requires an existing pending deposit")
+		}
 		native := *a
 		native.Adapter = processorAdapter{result: result}
 		r, e := http.NewRequest("POST", a.Config.PublicBaseURL[:len(a.Config.PublicBaseURL)-len(a.Config.BasePath)]+str(saved, "target"), bytes.NewReader(nil))

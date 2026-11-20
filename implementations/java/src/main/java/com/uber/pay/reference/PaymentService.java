@@ -494,7 +494,13 @@ final class PaymentService {
     }
     if (!result.state().equals("CONFIRMED"))
       throw new IllegalStateException("Unexpected capture decision");
-    adjust(c, Database.str(t, "account_id"), Database.str(t, "currency"), 0, -n);
+    adjust(c, Database.str(t, "account_id"), Database.str(t, "currency"), original - n, -n);
+    Database.execute(
+        c,
+        "UPDATE transactions SET amount_e5=? WHERE client_id=? AND kind='charge' AND id=?",
+        n,
+        config.client,
+        id);
     setState(c, "charge", id, result.state(), result.detail());
     return Reply.empty(200);
   }
@@ -549,8 +555,6 @@ final class PaymentService {
         && !q.get("merchant_reference").equals(snapshot.reference()))
       throw new ApiError(404, "VALIDATION_ERROR", "Reference mismatch");
     String status = snapshot.state();
-    if (status.equals("CANCELLED"))
-      throw new ApiError(400, "VALIDATION_ERROR", "Cancelled lookup status is not declared");
     ObjectNode out =
         Json.obj(
             "id",
