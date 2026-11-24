@@ -113,7 +113,10 @@ final class Gateway {
 
   Reply route(HttpServletRequest req) throws Exception {
     String raw = req.getRequestURI(), method = req.getMethod();
-    byte[] bytes = req.getInputStream().readNBytes(1048577);
+    byte[] bytes =
+        req.getAttribute(BoundedBodyFilter.BODY) instanceof byte[] buffered
+            ? buffered
+            : req.getInputStream().readNBytes(1048577);
     if (bytes.length > 1048576) throw new ApiError(400, "invalid_request", "Request too large");
     if (raw.equals("/health") && method.equals("GET")) {
       try (Connection c = db.open()) {
@@ -174,19 +177,53 @@ final class Gateway {
         .trim()
         .equalsIgnoreCase("application/json"))
       throw new ApiError(400, "invalid_request", "Content-Type must be application/json");
+    if (!method.equals("GET") && bytes.length == 0)
+      throw new ApiError(400, "invalid_request", "JSON body required");
     JsonNode body = bytes.length == 0 ? Json.obj() : Json.parse(bytes);
+    if (t.equals("/token")) {
+      if (!body.path("grant_type").isTextual() || body.path("grant_type").asText().isEmpty())
+        throw new ApiError(400, "invalid_request", "grant_type required");
+      if (!Set.of(
+              "authorization_code",
+              "refresh_token",
+              "urn:uberpay:params:oauth:grant-type:wallet-grant")
+          .contains(body.path("grant_type").asText()))
+        throw new ApiError(400, "unsupported_grant_type", "Unsupported grant");
+    }
+    if (body.has("id")
+        && (!body.path("id").isTextual()
+            || body.path("id").asText().isEmpty()
+            || body.path("id").asText().length() > 256))
+      throw new ApiError(400, "invalid_request", "Invalid transaction id");
     contracts.request(t, expected.toLowerCase(Locale.ROOT), body);
     if (t.equals("/token")) return wallets.token(body);
+    if (t.equals("/charge")
+        && body.has("return_url")
+        && !ReturnUrls.allowed(config, body.path("return_url").asText()))
+      throw new ApiError(400, "invalid_request", "Unregistered return URL");
     String scope = t.equals("/balance") ? "get_balance" : t.equals("/refund") ? "refund" : "charge";
     String account =
         t.equals("/balance")
             ? Json.text(body, "account_id")
-            : body.path("authorization").path("type").asText().equals("access_token_authorization")
-                ? body.path("authorization").path("account_id").asText()
-                : headers.containsKey("authorization") || config.oauthRequired
+            : Set.of("/charge/{id}/capture", "/charge/{id}/cancel", "/refund").contains(t)
+                ? (headers.containsKey("authorization")
+                        || config.oauthRequired
+                        || body.path("authorization")
+                            .path("type")
+                            .asText()
+                            .equals("access_token_authorization")
                     ? payments.accountForProtectedOperation(
                         t, raw.substring(config.base.length()), body)
-                    : null;
+                    : null)
+                : body.path("authorization")
+                        .path("type")
+                        .asText()
+                        .equals("access_token_authorization")
+                    ? body.path("authorization").path("account_id").asText()
+                    : headers.containsKey("authorization") || config.oauthRequired
+                        ? payments.accountForProtectedOperation(
+                            t, raw.substring(config.base.length()), body)
+                        : null;
     if (t.equals("/balance")
         || account != null
         || config.oauthRequired
@@ -226,9 +263,9 @@ final class Gateway {
               Database.one(
                   c,
                   "SELECT * FROM jobs WHERE client_id=? AND job_type='COMPLETION' AND"
-                      + " status='WAITING' AND payload::jsonb->>'payment_token'=?",
+                      + " status='WAITING' AND payload::jsonb->>'payment_token_hash'=?",
                   config.client,
-                  token);
+                  Json.hash(token));
           if (job == null) throw new ApiError(400, "invalid_request", "Invalid action");
           var payload =
               (com.fasterxml.jackson.databind.node.ObjectNode)
@@ -302,7 +339,7 @@ final class Gateway {
                   job.get("id"));
           if (n != 1) throw new ApiError(400, "invalid_request", "Action already consumed");
           String target = payload.path("return_url").asText();
-          if (config.redirects.contains(target))
+          if (ReturnUrls.allowed(config, target))
             return new Reply(302, "", Map.of("Location", target, "Cache-Control", "no-store"));
           return Reply.html(
               "<!doctype html><html><body>Local payment completion scheduled</body></html>");

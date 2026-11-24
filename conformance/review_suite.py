@@ -136,13 +136,14 @@ class ReviewRegressionSuite:
             self.process.restart(hard=True)
 
     def test_review_unregistered_return_url_never_redirected(self):
-        data, response = self.charge(
-            funding_method="DEMO_WEBVIEW", return_url="https://attacker.invalid/"
+        data = self.fixture(
+            "charge",
+            funding_method="DEMO_WEBVIEW",
+            return_url="https://attacker.invalid/",
         )
-        result = self.submit_action(self.action_page(response))
-        self.assertEqual(result.status, 200)
+        result = self.client.request("POST", "/charge", data, idem=self.uid())
+        self.assert_response(result, "/charge", 400)
         self.assertNotIn("location", result.headers)
-        self.accepted("chargeCallback", data["id"])
 
     def test_review_callback_401_refreshes_same_delivery_identity(self):
         data = self.fixture("charge", funding_method="DEMO_PENDING")
@@ -611,7 +612,7 @@ class ReviewRegressionSuite:
             200,
             "get",
         )
-        self.assertEqual(self.lookup(data["id"])["status"], "CANCELLED")
+        self.assertEqual(self.lookup(data["id"])["status"], "REJECTED")
         original, response = self.charge(funding_method="DEMO_WEBVIEW")
         self.submit_action(self.action_page(response))
         self.accepted("chargeCallback", original["id"])
@@ -740,6 +741,9 @@ class ReviewRegressionSuite:
         ]:
             change = json.loads(json.dumps(data))
             change["id"] = self.uid()
+            change["funding_method"] = (
+                "DEMO_MEAL_VOUCHER" if invalid[0].startswith("meal") else "DEMO_POINTS"
+            )
             change["payment_data"][0 if invalid[0].startswith("meal") else 1][
                 invalid[0]
             ] = invalid[1]
@@ -751,7 +755,7 @@ class ReviewRegressionSuite:
         token, _ = self.access("get_balance")
         payload = {
             "account_id": "demo-account",
-            "funding_method": "DEMO_SYNC",
+            "funding_method": "DEMO_MEAL_VOUCHER",
             "payment_data": [
                 {
                     "type": "meal_voucher_payment_data",

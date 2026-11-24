@@ -183,7 +183,7 @@ func (a *App) expireAuthorizations(ctx context.Context) error {
 	}
 	return tx.Commit(ctx)
 }
-func (a *App) processCompletion(ctx context.Context) (bool, error) {
+func (a *App) processCompletion(ctx context.Context) (worked bool, err error) {
 	tx, e := a.Store.Begin(ctx)
 	if e != nil {
 		return false, e
@@ -197,6 +197,23 @@ func (a *App) processCompletion(ctx context.Context) (bool, error) {
 	if e != nil {
 		return false, e
 	}
+	if _, e = tx.Exec(ctx, "SAVEPOINT worker_item"); e != nil {
+		return false, e
+	}
+	defer func() {
+		if err != nil {
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT worker_item")
+			_, recordErr := tx.Exec(ctx, "UPDATE jobs SET attempts=attempts+1,last_error='completion_unresolved',next_attempt_at=now()+(LEAST(60000,1000*power(2,LEAST(attempts,6)))*interval '1 millisecond') WHERE id=$1", job)
+			if recordErr == nil {
+				recordErr = tx.Commit(ctx)
+			}
+			log.Printf("worker_item_failed job_id=%s", job)
+			if recordErr == nil {
+				worked = true
+				err = nil
+			}
+		}
+	}()
 	v, e := DecodeJSON([]byte(payload))
 	if e != nil {
 		return false, e
@@ -322,8 +339,9 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback(ctx)
 	var id, kind, txID, name, body string
-	var attempts int
-	e = tx.QueryRow(ctx, "SELECT id,tx_kind,tx_id,callback_name,payload,attempts FROM jobs j WHERE client_id=$1 AND job_type='CALLBACK' AND ((status='PENDING' AND next_attempt_at<=now()) OR (status='PROCESSING' AND lease_until<=now())) AND NOT EXISTS(SELECT 1 FROM jobs older WHERE older.client_id=j.client_id AND older.tx_kind=j.tx_kind AND older.tx_id=j.tx_id AND older.job_type='CALLBACK' AND older.event_sequence<j.event_sequence AND older.status<>'DONE') ORDER BY next_attempt_at,event_sequence LIMIT 1 FOR UPDATE SKIP LOCKED", a.Config.ClientID).Scan(&id, &kind, &txID, &name, &body, &attempts)
+	var attempts, retryStartCount int
+	var retryStarted time.Time
+	e = tx.QueryRow(ctx, "SELECT id,tx_kind,tx_id,callback_name,payload,attempts,retry_started_at,retry_count_at_start FROM jobs j WHERE client_id=$1 AND job_type='CALLBACK' AND ((status='PENDING' AND next_attempt_at<=now()) OR (status='PROCESSING' AND lease_until<=now())) AND NOT EXISTS(SELECT 1 FROM jobs older WHERE older.client_id=j.client_id AND older.tx_kind=j.tx_kind AND older.tx_id=j.tx_id AND older.job_type='CALLBACK' AND older.event_sequence<j.event_sequence AND older.status<>'DONE') ORDER BY next_attempt_at,event_sequence LIMIT 1 FOR UPDATE SKIP LOCKED", a.Config.ClientID).Scan(&id, &kind, &txID, &name, &body, &attempts, &retryStarted, &retryStartCount)
 	if notFound(e) {
 		return false, nil
 	}
@@ -340,6 +358,7 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	}
 	path, scope, idem, e := BuildCallback(name, txID, nil)
 	code := 0
+	var retryAfter time.Duration
 	if e == nil {
 		var token string
 		token, e = a.Tokens.Get(ctx, a, scope)
@@ -356,6 +375,14 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 				resp, e = a.Client.Do(req)
 				if e == nil {
 					code = resp.StatusCode
+					if code == 429 || code == 503 {
+						value := resp.Header.Get("Retry-After")
+						if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+							retryAfter = time.Duration(min(n, 3600)) * time.Second
+						} else if until, err := http.ParseTime(value); err == nil {
+							retryAfter = min(time.Hour, max(0, time.Until(until)))
+						}
+					}
 					_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1048576))
 					resp.Body.Close()
 				}
@@ -373,19 +400,25 @@ func (a *App) processCallback(ctx context.Context) (bool, error) {
 	} else if code == 409 {
 		status = "RECONCILE"
 		last = "callback conflict requires reconciliation"
-	} else if e == nil && code >= 400 && code < 500 && code != 429 && code != 401 || attempts+1 >= a.Config.MaxAttempts {
+	} else if e == nil && code >= 400 && code < 500 && code != 429 && code != 401 || time.Since(retryStarted) >= a.Config.CallbackBudget || a.Config.MaxAttempts > 0 && attempts+1-retryStartCount >= a.Config.MaxAttempts {
 		status = "FAILED"
 		last = "callback rejected or retry budget exhausted"
 	}
 	shift := attempts
-	if shift > 7 {
-		shift = 7
+	if shift > 10 {
+		shift = 10
 	}
 	delay := a.Config.Retry * time.Duration(1<<shift)
-	if delay > 30*time.Second {
-		delay = 30 * time.Second
+	if delay > 60*time.Second {
+		delay = 60 * time.Second
 	}
 	delay += time.Duration(rand.Int64N(max(1, int64(a.Config.Retry/5))))
+	if retryAfter > delay {
+		delay = retryAfter
+	}
+	if status == "FAILED" || status == "RECONCILE" {
+		log.Printf("callback_chain_blocked job_id=%s status=%s", id, status)
+	}
 	_, err := a.Store.Pool.Exec(ctx, "UPDATE jobs SET status=$2,lease_until=NULL,last_error=NULLIF($3,''),next_attempt_at=now()+($4*interval '1 millisecond') WHERE id=$1 AND status='PROCESSING' AND lease_until=$5", id, status, last, delay.Milliseconds(), lease)
 	return true, err
 }

@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urlsplit, parse_qs, quote
 from .review_suite import ReviewRegressionSuite
 from .completion_suite import CompletionSuite
 from .owner_suite import OwnerSuite
+from .consolidated_suite import ConsolidatedSuite
 from . import contract
 from .wire import eventually
 
@@ -32,7 +33,11 @@ class HiddenForm(HTMLParser):
 
 
 class GatewaySuite(
-    OwnerSuite, CompletionSuite, ReviewRegressionSuite, unittest.TestCase
+    ConsolidatedSuite,
+    OwnerSuite,
+    CompletionSuite,
+    ReviewRegressionSuite,
+    unittest.TestCase,
 ):
     client = mock = process = None
     client_id = "demo-client"

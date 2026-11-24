@@ -1,4 +1,5 @@
 import { decode, encode, type Json } from './codec.js';
+import type { Connection } from './store.js';
 import { Service } from './service.js';
 
 export class Worker {
@@ -58,6 +59,26 @@ export class Worker {
       this.renewing.delete(scope);
     }
   }
+  private async item(db: Connection, job: Json, run: () => Promise<void>): Promise<void> {
+    await db.query('SAVEPOINT worker_item');
+    try {
+      await run();
+      await db.query('RELEASE SAVEPOINT worker_item');
+    } catch (e) {
+      await db.query('ROLLBACK TO SAVEPOINT worker_item');
+      await db.query(
+        "UPDATE jobs SET attempts=attempts+1,last_error='completion_unresolved',next_attempt_at=now()+(LEAST(60000,1000*power(2,LEAST(attempts,6)))*interval '1 millisecond') WHERE id=$1",
+        [job.id],
+      );
+      console.error(
+        JSON.stringify({
+          event: 'worker_item_failed',
+          job_id: job.id,
+          error_type: e instanceof Error ? e.constructor.name : 'Error',
+        }),
+      );
+    }
+  }
   async tick(): Promise<void> {
     if (this.running || this.stopped) return;
     this.running = true;
@@ -74,11 +95,21 @@ export class Worker {
           [config.clientId],
         );
         for (const action of actions.rows) {
-          const payload = decode(action.payload);
-          if (Number(payload.expires_at) <= Date.now()) {
-            await this.service.complete(db, action.tx_kind, action.tx_id, 'REJECTED', 'MERCHANT_EXPIRED');
-            await db.query(`UPDATE jobs SET status='DONE',attempts=attempts+1 WHERE id=$1`, [action.id]);
-          }
+          await this.item(db, action, async () => {
+            const payload = decode(action.payload);
+            if (Number(payload.expires_at) <= Date.now()) {
+              await this.service.complete(
+                db,
+                action.tx_kind,
+                action.tx_id,
+                'REJECTED',
+                'MERCHANT_EXPIRED',
+              );
+              await db.query(`UPDATE jobs SET status='DONE',attempts=attempts+1 WHERE id=$1`, [
+                action.id,
+              ]);
+            }
+          });
         }
         const pending = await db.query(
           `SELECT * FROM jobs WHERE client_id=$1 AND job_type='COMPLETION' AND status='PENDING'
@@ -86,23 +117,29 @@ export class Worker {
           [config.clientId],
         );
         for (const job of pending.rows) {
-          await this.service.complete(
-            db,
-            job.tx_kind,
-            job.tx_id,
-            decode(job.payload).state,
-            decode(job.payload).detail,
-            decode(job.payload).amount_e5,
-          );
-          await db.query(`UPDATE jobs SET status='DONE',attempts=attempts+1 WHERE id=$1`, [job.id]);
+          await this.item(db, job, async () => {
+            await this.service.complete(
+              db,
+              job.tx_kind,
+              job.tx_id,
+              decode(job.payload).state,
+              decode(job.payload).detail,
+              decode(job.payload).amount_e5,
+            );
+            await db.query(`UPDATE jobs SET status='DONE',attempts=attempts+1 WHERE id=$1`, [
+              job.id,
+            ]);
+          });
         }
         const reviews = await db.query(
           `SELECT * FROM jobs j WHERE j.client_id=$1 AND j.job_type='REVERSAL' AND j.status='PENDING' AND j.next_attempt_at<=now()`,
           [config.clientId],
         );
         for (const review of reviews.rows) {
-          await this.service.reverseRefund(db, review.tx_id);
-          await db.query("UPDATE jobs SET status='DONE' WHERE id=$1", [review.id]);
+          await this.item(db, review, async () => {
+            await this.service.reverseRefund(db, review.tx_id);
+            await db.query("UPDATE jobs SET status='DONE' WHERE id=$1", [review.id]);
+          });
         }
       });
       const job = await store.transaction(async (db) => {
@@ -135,6 +172,7 @@ export class Worker {
   private async deliver(job: Json): Promise<void> {
     const { config, store, contract } = this.service;
     let status: number | undefined;
+    let retryAfter = 0;
     try {
       const payload = decode(job.payload);
       const callback = contract.callback(job.callback_name, job.tx_id, payload);
@@ -152,6 +190,18 @@ export class Worker {
         body: encode(payload),
       });
       status = response.status;
+      if (status === 429 || status === 503) {
+        const value = response.headers.get('retry-after');
+        if (value)
+          retryAfter = Math.min(
+            3600000,
+            Math.max(
+              0,
+              /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now(),
+            ),
+          );
+        if (!Number.isFinite(retryAfter)) retryAfter = 0;
+      }
       await response.body?.cancel();
       if (status === 401) this.tokens.delete(callback.scope);
     } catch {
@@ -163,12 +213,21 @@ export class Worker {
         ? 'DONE'
         : status === 409
           ? 'RECONCILE'
-          : retryable && job.attempts < config.maxAttempts
+          : retryable &&
+              Date.now() - new Date(job.retry_started_at).getTime() < config.callbackBudgetMs &&
+              (config.maxAttempts === 0 ||
+                job.attempts - job.retry_count_at_start < config.maxAttempts)
             ? 'PENDING'
             : 'FAILED';
-    const delay =
+    const delay = Math.max(
+      retryAfter,
       Math.min(60000, config.retryMs * 2 ** Math.min(job.attempts - 1, 10)) +
-      (Math.random() * config.retryMs) / 5;
+        (Math.random() * config.retryMs) / 5,
+    );
+    if (state === 'FAILED' || state === 'RECONCILE')
+      console.error(
+        JSON.stringify({ event: 'callback_chain_blocked', job_id: job.id, status: state }),
+      );
     await store.transaction(async (db) => {
       await db.query(
         `UPDATE jobs SET status=$2,next_attempt_at=$3,lease_until=NULL,last_error=$4

@@ -153,7 +153,7 @@
       ]
     },
     {
-      "name": "cancelled_lookup_returns_terminal_state",
+      "name": "cancelled_lookup_returns_upstream_rejected",
       "steps": [
         {
           "method": "POST",
@@ -183,7 +183,7 @@
           "expect": {
             "status": 200,
             "body": {
-              "status": "CANCELLED"
+              "status": "REJECTED"
             }
           }
         }

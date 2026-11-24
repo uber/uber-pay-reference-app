@@ -11,6 +11,7 @@ final class Json {
   static final ObjectMapper MAPPER =
       new ObjectMapper()
           .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
 
   private Json() {}

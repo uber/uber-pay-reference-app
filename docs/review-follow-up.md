@@ -65,7 +65,7 @@ data instead of treating idempotent startup DDL as a production financial migrat
 
 ## Owner-decision completion
 
-U4 returns200 CANCELLED using an explicit derived-runtime extension. U5 supports
+November24 follow-up supersedes the U4 default:200 REJECTED, with CANCELLED only under ENABLE_CANCELLED_LOOKUP. See review-2026-11-24.md. U5 supports
 one partial capture and releases unused hold, preserving the original authorized
 amount and refund cap. U11 accepts bounded provider-driven deposit reductions.
 U15 now has immutable SQL journal/batches/files, deterministic per-source reports,

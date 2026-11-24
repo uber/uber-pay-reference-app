@@ -72,6 +72,7 @@ final class CallbackWorker implements AutoCloseable {
                         + " status='PENDING' AND next_attempt_at<=now() ORDER BY next_attempt_at"
                         + " LIMIT 20",
                     config.client)) {
+              var savepoint = c.setSavepoint();
               try {
                 payments.complete(
                     c,
@@ -82,9 +83,19 @@ final class CallbackWorker implements AutoCloseable {
                         .path("detail")
                         .asText("MERCHANT_REJECTED"),
                     Json.parse(Database.str(j, "payload")).path("amount_e5"));
-              } catch (ApiError e) {
+              } catch (Exception e) {
+                c.rollback(savepoint);
                 Database.execute(
-                    c, "UPDATE jobs SET status='DONE',lease_until=NULL WHERE id=?", j.get("id"));
+                    c,
+                    "UPDATE jobs SET"
+                        + " attempts=attempts+1,last_error='completion_unresolved',next_attempt_at=now()+(LEAST(60000,1000*power(2,LEAST(attempts,6)))*interval"
+                        + " '1 millisecond') WHERE id=?",
+                    j.get("id"));
+                System.err.println(
+                    "worker_item_failed job_id="
+                        + j.get("id")
+                        + " error_type="
+                        + e.getClass().getSimpleName());
               }
             }
             for (var review :
@@ -122,7 +133,8 @@ final class CallbackWorker implements AutoCloseable {
                 return r;
               });
       if (j != null) deliver(j);
-    } catch (Exception ignored) {
+    } catch (Exception workerError) {
+      System.err.println("worker_error_type=" + workerError.getClass().getSimpleName());
       System.err.println(
           "worker iteration failed; durable work retained (no request or credentials logged)");
     }
@@ -161,6 +173,7 @@ final class CallbackWorker implements AutoCloseable {
   void deliver(Map<String, Object> j) {
     int attempt = ((Number) j.get("attempts")).intValue() + 1;
     String status = "PENDING", error = null;
+    long retryAfter = 0;
     try {
       String name = Database.str(j, "callback_name"), id = Database.str(j, "tx_id");
       JsonNode def = contracts.spec.path("components").path("callbacks").path(name);
@@ -185,13 +198,31 @@ final class CallbackWorker implements AutoCloseable {
       for (JsonNode param : op.path("parameters"))
         if (contracts.resolve(param).path("name").asText().equals("X-Idempotency-Key"))
           request.header("X-Idempotency-Key", Database.str(j, "id"));
-      int code =
+      var response =
           http.send(
-                  request
-                      .POST(HttpRequest.BodyPublishers.ofString(Database.str(j, "payload")))
-                      .build(),
-                  HttpResponse.BodyHandlers.discarding())
-              .statusCode();
+              request.POST(HttpRequest.BodyPublishers.ofString(Database.str(j, "payload"))).build(),
+              HttpResponse.BodyHandlers.discarding());
+      int code = response.statusCode();
+      if (code == 429 || code == 503) {
+        String value = response.headers().firstValue("Retry-After").orElse("");
+        try {
+          retryAfter = Math.min(3600000, Math.max(0, Long.parseLong(value) * 1000));
+        } catch (NumberFormatException ex) {
+          try {
+            retryAfter =
+                Math.min(
+                    3600000,
+                    Math.max(
+                        0,
+                        java.time.ZonedDateTime.parse(
+                                    value, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                                .toInstant()
+                                .toEpochMilli()
+                            - System.currentTimeMillis()));
+          } catch (Exception ignored) {
+          }
+        }
+      }
       if (code >= 200 && code < 300) status = "DONE";
       else if (code == 409) {
         status = "RECONCILE";
@@ -209,11 +240,20 @@ final class CallbackWorker implements AutoCloseable {
     } catch (Exception e) {
       error = "Callback transport or credential failure";
     }
-    if (status.equals("PENDING") && attempt >= config.maxAttempts) status = "FAILED";
+    if (status.equals("PENDING")
+        && (System.currentTimeMillis()
+                    - java.time.Instant.parse(Database.str(j, "retry_started_at")).toEpochMilli()
+                >= config.callbackBudget
+            || config.maxAttempts > 0
+                && attempt - ((Number) j.get("retry_count_at_start")).intValue()
+                    >= config.maxAttempts)) status = "FAILED";
+    if (status.equals("FAILED") || status.equals("RECONCILE"))
+      System.err.println("callback_chain_blocked job_id=" + j.get("id") + " status=" + status);
     String out = status, err = error;
     long delay =
         Math.min(60000L, config.retryMs * (1L << Math.min(attempt - 1, 10)))
             + ThreadLocalRandom.current().nextInt(Math.max(1, config.retryMs / 4));
+    final long retryDelay = Math.max(delay, retryAfter);
     db.atomic(
         c -> {
           Database.execute(
@@ -223,7 +263,7 @@ final class CallbackWorker implements AutoCloseable {
                   + " lease_until>now()",
               out,
               err,
-              delay,
+              retryDelay,
               j.get("id"),
               attempt);
           return null;

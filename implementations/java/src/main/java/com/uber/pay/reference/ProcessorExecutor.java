@@ -135,7 +135,18 @@ final class ProcessorExecutor implements AutoCloseable {
         Cipher.ENCRYPT_MODE,
         new SecretKeySpec(Base64.getDecoder().decode(config.processorKey), "AES"),
         new GCMParameterSpec(128, nonce));
-    cipher.updateAAD((config.client + "|" + id).getBytes(StandardCharsets.UTF_8));
+    cipher.updateAAD(
+        (config.client
+                + "|"
+                + id
+                + "|"
+                + value.path("operation").asText()
+                + "|"
+                + PaymentService.resourceKey(
+                    value.path("operation").asText(),
+                    value.path("resource").asText(),
+                    value.path("body")))
+            .getBytes(StandardCharsets.UTF_8));
     byte[] crypt = cipher.doFinal(Json.string(value).getBytes(StandardCharsets.UTF_8));
     byte[] out = new byte[nonce.length + crypt.length];
     System.arraycopy(nonce, 0, out, 0, 12);
@@ -151,7 +162,15 @@ final class ProcessorExecutor implements AutoCloseable {
         Cipher.DECRYPT_MODE,
         new SecretKeySpec(Base64.getDecoder().decode(config.processorKey), "AES"),
         new GCMParameterSpec(128, raw, 0, 12));
-    c.updateAAD((config.client + "|" + Database.str(row, "id")).getBytes(StandardCharsets.UTF_8));
+    c.updateAAD(
+        (config.client
+                + "|"
+                + Database.str(row, "id")
+                + "|"
+                + Database.str(row, "operation_name")
+                + "|"
+                + Database.str(row, "resource_key"))
+            .getBytes(StandardCharsets.UTF_8));
     JsonNode value =
         Json.parse(new String(c.doFinal(raw, 12, raw.length - 12), StandardCharsets.UTF_8));
     if (!value.path("config_hash").asText().equals(configHash()))
@@ -168,11 +187,34 @@ final class ProcessorExecutor implements AutoCloseable {
             .header("X-Reference-Client", config.client);
     if (body == null) b.GET();
     else b.POST(HttpRequest.BodyPublishers.ofString(Json.string(body)));
-    var res = http.send(b.build(), HttpResponse.BodyHandlers.ofInputStream());
+    long deadline =
+        System.nanoTime()
+            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(config.processorTimeout);
+    var pending = http.sendAsync(b.build(), HttpResponse.BodyHandlers.ofInputStream());
+    var res = pending.get(config.processorTimeout, java.util.concurrent.TimeUnit.MILLISECONDS);
     try (var stream = res.body()) {
       if (body == null && res.statusCode() == 404) return null;
       if (res.statusCode() != 200) throw new IllegalStateException("Processor outcome unresolved");
-      byte[] raw = stream.readNBytes(1048577);
+      // A bounded virtual thread permits cancellation/stream-close even if headers
+      // arrived but the peer never finishes its body.
+      var read =
+          java.util.concurrent.CompletableFuture.supplyAsync(
+              () -> {
+                try {
+                  return stream.readNBytes(1048577);
+                } catch (java.io.IOException e) {
+                  throw new java.io.UncheckedIOException(e);
+                }
+              });
+      byte[] raw;
+      try {
+        raw =
+            read.get(
+                Math.max(1, deadline - System.nanoTime()),
+                java.util.concurrent.TimeUnit.NANOSECONDS);
+      } finally {
+        read.cancel(true);
+      }
       if (raw.length > 1048576) throw new IllegalStateException("Processor response exceeds limit");
       return Json.parse(new String(raw, StandardCharsets.UTF_8));
     }
@@ -253,6 +295,10 @@ final class ProcessorExecutor implements AutoCloseable {
     Map<String, Object> row =
         db.raw(
             c -> {
+              Database.execute(
+                  c,
+                  "SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
+                  "idem|" + config.client + "|" + op + "|" + idem);
               Database.execute(c, "SELECT pg_advisory_xact_lock(hashtextextended(?,0))", key);
               var mapping =
                   Database.one(
@@ -269,6 +315,11 @@ final class ProcessorExecutor implements AutoCloseable {
               if (current != null && !Database.str(current, "fingerprint").equals(fp))
                 throw conflict(op);
               if (current == null) {
+                Database.execute(
+                    c,
+                    "SELECT reference_lock_accounts(?,?::jsonb)",
+                    config.client,
+                    Json.string(body));
                 Savepoint sp = c.setSavepoint();
                 var validation = new PaymentService(config, db, service.contracts, new Pure(null));
                 Reply result =
@@ -381,7 +432,8 @@ final class ProcessorExecutor implements AutoCloseable {
             c -> {
               Database.execute(
                   c,
-                  "UPDATE provider_intents SET status='PENDING',failures=0,next_attempt_at=now()"
+                  "UPDATE provider_intents SET"
+                      + " status='PENDING',failures=0,recovery_started_at=NULL,next_attempt_at=now()"
                       + " WHERE id=? AND status='RECONCILE'",
                   row.get("id"));
               return null;
@@ -455,12 +507,17 @@ final class ProcessorExecutor implements AutoCloseable {
           c -> {
             Database.execute(
                 c,
-                "UPDATE provider_intents SET failures=failures+1,status=CASE WHEN failures+1>=?"
+                "UPDATE provider_intents SET"
+                    + " recovery_started_at=COALESCE(recovery_started_at,now()),failures=failures+1,status=CASE"
+                    + " WHEN (? > 0 AND failures+1>=?) OR"
+                    + " COALESCE(recovery_started_at,now())<=now()-(?*interval '1 millisecond')"
                     + " THEN 'RECONCILE' ELSE 'UNCERTAIN'"
-                    + " END,lease_until=NULL,next_attempt_at=now()+(?*interval '1"
-                    + " millisecond'),last_error='processor_unresolved' WHERE id=? AND"
+                    + " END,lease_until=NULL,next_attempt_at=now()+(LEAST(60000,?*power(2,LEAST(failures,10)))*interval"
+                    + " '1 millisecond'),last_error='processor_unresolved' WHERE id=? AND"
                     + " generation=?",
                 config.processorMaxFailures,
+                config.processorMaxFailures,
+                config.processorBudget,
                 config.processorPoll,
                 row.get("id"),
                 row.get("generation"));
@@ -487,9 +544,18 @@ final class ProcessorExecutor implements AutoCloseable {
           if (current.get("response_status") != null
               && version <= Database.number(current, "last_provider_version")) {
             Database.execute(
-                c, "UPDATE provider_intents SET lease_until=NULL WHERE id=?", row.get("id"));
+                c,
+                "UPDATE provider_intents SET lease_until=NULL,next_attempt_at=now()+(?*interval '1"
+                    + " millisecond'),failures=0,recovery_started_at=NULL WHERE id=?",
+                config.processorPoll,
+                row.get("id"));
             return replay(current);
           }
+          Database.execute(
+              c,
+              "SELECT reference_lock_accounts(?,?::jsonb)",
+              config.client,
+              Json.string(ctx.path("body")));
           Database.execute(c, "SELECT set_config('reference.intent_id',?,true)", row.get("id"));
           String op = ctx.path("operation").asText(),
               kind = op.equals("payout") ? "payout" : op.equals("initRefund") ? "refund" : "charge";
@@ -608,7 +674,8 @@ final class ProcessorExecutor implements AutoCloseable {
                   + " status=?,last_provider_version=?,provider_reference=?,lease_until=NULL,next_attempt_at=now()+(?*interval"
                   + " '1 millisecond'),response_status=COALESCE(response_status,?),response_body=COALESCE(response_body,?),response_headers=CASE"
                   + " WHEN response_status IS NULL THEN ?::jsonb ELSE response_headers"
-                  + " END,last_error=NULL,failures=0,updated_at=now() WHERE id=? AND generation=?",
+                  + " END,last_error=NULL,failures=0,recovery_started_at=NULL,updated_at=now()"
+                  + " WHERE id=? AND generation=?",
               pending ? "PENDING" : "DONE",
               version,
               ref,

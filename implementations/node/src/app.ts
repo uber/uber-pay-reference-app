@@ -1,3 +1,4 @@
+import { allowedReturn } from './return-url.js';
 import express, { type Request, type Response } from 'express';
 import type { Config } from './config.js';
 import { Contract, ContractError } from './contract.js';
@@ -40,6 +41,9 @@ export function createApp(
   store: Store,
   contract = new Contract(config.root, config.contractFile, config.strictAccountName),
 ) {
+  if (config.strictDescription)
+    contract.spec.components.schemas.TransactionDescription.pattern =
+      contract.spec.components.schemas.TransactionDescription['x-upstream-pattern'];
   const service = new Service(config, store, contract);
   if (config.processorMode === 'http') service.executor = new ProcessorExecutor(service);
   const app = express();
@@ -70,7 +74,10 @@ export function createApp(
     let query: Json;
     try {
       query = oneQuery(req);
-      if (query.client_id !== config.clientId || !config.allowedRedirects.includes(query.redirect_uri))
+      if (
+        query.client_id !== config.clientId ||
+        !config.allowedRedirects.includes(query.redirect_uri)
+      )
         throw new Failure(400);
       const { consent, csrf, locale, details } = await service.authorize(query);
       const text = (key: string) => html(service.features.text(locale, key));
@@ -81,7 +88,8 @@ export function createApp(
             `<li>${text('method')}: ${html(d.funding_method)} — ${text('country')}: ${html(d.country_iso2)}</li>`,
         )
         .join('');
-      res.type('html').send(`<!doctype html><html><head><title>Local demo wallet consent</title></head><body>
+      res.type('html')
+        .send(`<!doctype html><html lang="${html(locale)}"><head><title>Local demo wallet consent</title></head><body>
 <h1>${text('consent_title')}</h1><p>${text('synthetic')}</p><ul>${methods}</ul><p>${text('scopes')}: ${html(query.scope)}</p>
 <form method="post" action="/demo/consent"><input type="hidden" name="consent_token" value="${html(consent)}">
 <input type="hidden" name="csrf" value="${html(csrf)}"><button name="decision" value="approve">${text('approve')}</button>
@@ -95,7 +103,10 @@ export function createApp(
         const target = new URL(query.redirect_uri);
         target.searchParams.set(
           'error',
-          error instanceof Failure && error.detail === 'invalid_scope' ? 'invalid_scope' : 'invalid_request',
+          error instanceof Failure &&
+            ['invalid_scope', 'unsupported_response_type'].includes(error.detail)
+            ? error.detail
+            : 'invalid_request',
         );
         if (typeof query.state === 'string') target.searchParams.set('state', query.state);
         res.redirect(302, target.toString());
@@ -120,8 +131,8 @@ export function createApp(
       const token = oneQuery(req).token;
       const job = (
         await store.pool.query(
-          `SELECT payload FROM jobs WHERE client_id=$1 AND status='WAITING' AND payload::jsonb->>'payment_token'=$2`,
-          [config.clientId, token],
+          `SELECT payload FROM jobs WHERE client_id=$1 AND status='WAITING' AND payload::jsonb->>'payment_token_hash'=$2`,
+          [config.clientId, hash(token ?? '')],
         )
       ).rows[0];
       if (!job) throw new Failure(400);
@@ -133,7 +144,8 @@ export function createApp(
       const amount = payload.profile?.allow_amount_update
         ? `<label>${text('amount')}<input name="amount_e5" inputmode="numeric"></label>`
         : '';
-      res.type('html').send(`<!doctype html><html><head><title>Complete local payment</title></head><body>
+      res.type('html')
+        .send(`<!doctype html><html><head><title>Complete local payment</title></head><body>
 <h1>${text('payment_title')}</h1><p>${text('synthetic')}</p><form method="post" action="/demo/complete">
 <input type="hidden" name="payment_token" value="${html(token)}"><input type="hidden" name="csrf" value="${html(payload.csrf)}">
 ${amount}<button name="decision" value="approve">${text('confirm')}</button><button name="decision" value="deny">${text('reject')}</button></form></body></html>`);
@@ -147,11 +159,12 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
       const returnUrl = await store.transaction(async (db) => {
         const job = (
           await db.query(
-            `SELECT * FROM jobs WHERE client_id=$1 AND status='WAITING' AND payload::jsonb->>'payment_token'=$2`,
-            [config.clientId, form.get('payment_token')],
+            `SELECT * FROM jobs WHERE client_id=$1 AND status='WAITING' AND payload::jsonb->>'payment_token_hash'=$2`,
+            [config.clientId, hash(form.get('payment_token') ?? '')],
           )
         ).rows[0];
-        if (!job || !['approve', 'deny'].includes(form.get('decision') ?? '')) throw new Failure(400);
+        if (!job || !['approve', 'deny'].includes(form.get('decision') ?? ''))
+          throw new Failure(400);
         const payload = decode(job.payload);
         if (Number(payload.expires_at) <= Date.now()) throw new Failure(400);
         if (!safeEqual(payload.csrf, form.get('csrf') ?? '')) throw new Failure(400);
@@ -159,7 +172,8 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
         payload.detail = 'USER_CANCELLED';
         const amount = form.get('amount_e5');
         if (amount) {
-          if (!payload.profile?.allow_amount_update || !/^[1-9][0-9]*$/.test(amount)) throw new Failure(400);
+          if (!payload.profile?.allow_amount_update || !/^[1-9][0-9]*$/.test(amount))
+            throw new Failure(400);
           const tx = (
             await db.query(
               "SELECT amount_e5 FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2",
@@ -169,13 +183,13 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
           if (BigInt(amount) > tx.amount_e5) throw new Failure(400);
           payload.amount_e5 = BigInt(amount);
         }
-        await db.query(`UPDATE jobs SET payload=$2,status='PENDING',next_attempt_at=now() WHERE id=$1`, [
-          job.id,
-          encode(payload),
-        ]);
+        await db.query(
+          `UPDATE jobs SET payload=$2,status='PENDING',next_attempt_at=now() WHERE id=$1`,
+          [job.id, encode(payload)],
+        );
         return payload.return_url;
       });
-      if (config.allowedRedirects.includes(returnUrl)) res.redirect(302, returnUrl);
+      if (allowedReturn(config, returnUrl)) res.redirect(302, returnUrl);
       else res.status(200).send('Local payment completion scheduled');
     } catch {
       res.status(400).send('Invalid payment completion');
@@ -183,7 +197,10 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
   });
 
   app.post('/adapter/events', async (req, res) => {
-    if (!service.executor || !safeEqual(req.get('authorization') ?? '', 'Bearer ' + config.processorToken)) {
+    if (
+      !service.executor ||
+      !safeEqual(req.get('authorization') ?? '', 'Bearer ' + config.processorToken)
+    ) {
       res.status(404).end();
       return;
     }
@@ -196,7 +213,10 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
   });
 
   app.use('/_test', async (req, res) => {
-    if (!config.enableControl || !safeEqual(req.get('X-Test-Control-Secret') ?? '', config.controlSecret)) {
+    if (
+      !config.enableControl ||
+      !safeEqual(req.get('X-Test-Control-Secret') ?? '', config.controlSecret)
+    ) {
       res.status(404).end();
       return;
     }
@@ -232,25 +252,32 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
           ).rows[0];
           if (!job) throw new Failure(404);
           if (['WAITING', 'PENDING'].includes(job.status)) {
-            await db.query(`UPDATE jobs SET status='PENDING',payload=$2,next_attempt_at=now() WHERE id=$1`, [
-              job.id,
-              encode({ ...decode(job.payload), state: body.state }),
-            ]);
+            await db.query(
+              `UPDATE jobs SET status='PENDING',payload=$2,next_attempt_at=now() WHERE id=$1`,
+              [job.id, encode({ ...decode(job.payload), state: body.state })],
+            );
           }
         } else if (req.path === '/reverse-refund') {
           await service.reverseRefund(db, body.id);
         } else if (req.path === '/expire') {
           const tx = (
-            await db.query(`SELECT * FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2`, [
-              config.clientId,
-              body.id,
-            ])
+            await db.query(
+              `SELECT * FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2`,
+              [config.clientId, body.id],
+            )
           ).rows[0];
           if (!tx) throw new Failure(404);
           await service.expire(db, tx, true);
         } else if (req.path === '/callback') {
           contract.callback(body.name, body.id, body.payload);
-          await service.queue(db, `test-${body.name}`, body.id, 'CALLBACK', body.name, body.payload);
+          await service.queue(
+            db,
+            `test-${body.name}`,
+            body.id,
+            'CALLBACK',
+            body.name,
+            body.payload,
+          );
         } else throw new Failure(404);
       });
       send(res, { status: 200, body: { ok: true } });
@@ -260,7 +287,9 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
   });
 
   app.use(async (req, res) => {
-    const suffix = req.path.startsWith(config.basePath + '/') ? req.path.slice(config.basePath.length) : '';
+    const suffix = req.path.startsWith(config.basePath + '/')
+      ? req.path.slice(config.basePath.length)
+      : '';
     const path = /^\/charge\/[^/]+\/(capture|cancel)$/.test(suffix)
       ? suffix.replace(/^\/charge\/[^/]+/, '/charge/{id}')
       : suffix;
@@ -276,7 +305,7 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
         req.originalUrl,
         req.headers,
         Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
-        { [config.keyId]: config.publicKey },
+        config.signingKeys,
         config.skewSeconds,
       );
     } catch {
@@ -294,6 +323,17 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
         if (param.in === 'query' && param.required && typeof body[param.name] !== 'string')
           throw new Failure(400);
       }
+      if (
+        op.operationId === 'charge' &&
+        body.return_url !== undefined &&
+        !allowedReturn(config, body.return_url)
+      )
+        throw new Failure(400);
+      if (
+        body.id !== undefined &&
+        (typeof body.id !== 'string' || !body.id || body.id.length > 256)
+      )
+        throw new Failure(400);
       const scope =
         op.operationId === 'getBalance'
           ? 'get_balance'
@@ -308,7 +348,8 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
             body.authorization?.type === 'access_token_authorization' ||
             !!req.get('authorization')));
       if (bearerNeeded) {
-        let account = op.operationId === 'getBalance' ? body.account_id : body.authorization?.account_id;
+        let account =
+          op.operationId === 'getBalance' ? body.account_id : body.authorization?.account_id;
         const resourceId = ['capture', 'cancel'].includes(op.operationId)
           ? decodeURIComponent(req.path.split('/').at(-2)!)
           : op.operationId === 'initRefund'
@@ -324,7 +365,8 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
         await service.bearer(req.get('authorization'), scope, account);
       }
       const execute =
-        service.executor && ['charge', 'capture', 'cancel', 'initRefund', 'payout'].includes(op.operationId)
+        service.executor &&
+        ['charge', 'capture', 'cancel', 'initRefund', 'payout'].includes(op.operationId)
           ? service.executor
           : service;
       const result = await execute.execute(
@@ -339,10 +381,15 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
       const status =
         error instanceof Failure
           ? error.status
-          : error instanceof SyntaxError || error instanceof ContractError
+          : error instanceof SyntaxError ||
+              error instanceof ContractError ||
+              error instanceof URIError
             ? 400
             : 500;
-      send(res, service.error(op, status, error instanceof Failure ? error.detail : 'VALIDATION_ERROR'));
+      send(
+        res,
+        service.error(op, status, error instanceof Failure ? error.detail : 'VALIDATION_ERROR'),
+      );
     }
   });
   app.use((error: Json, _req: Request, res: Response, _next: express.NextFunction) => {

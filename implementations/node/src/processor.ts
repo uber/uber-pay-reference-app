@@ -54,12 +54,28 @@ export class ProcessorExecutor {
   private stopping = false;
   constructor(readonly service: Service) {}
   private configHash(): string {
-    return hash(canonical({ data: this.service.features.data, aliases: this.service.features.aliases }));
+    return hash(
+      canonical({ data: this.service.features.data, aliases: this.service.features.aliases }),
+    );
   }
   private encrypt(id: string, ctx: Context): string {
     const iv = randomBytes(12),
-      c = createCipheriv('aes-256-gcm', Buffer.from(this.service.config.processorKey, 'base64'), iv);
-    c.setAAD(Buffer.from(this.service.config.clientId + '|' + id));
+      c = createCipheriv(
+        'aes-256-gcm',
+        Buffer.from(this.service.config.processorKey, 'base64'),
+        iv,
+      );
+    c.setAAD(
+      Buffer.from(
+        this.service.config.clientId +
+          '|' +
+          id +
+          '|' +
+          ctx.operation +
+          '|' +
+          this.service.resourceKey(ctx.operation, ctx.target, ctx.body),
+      ),
+    );
     return Buffer.concat([iv, c.update(encode(ctx)), c.final(), c.getAuthTag()]).toString('base64');
   }
   private decrypt(row: Json): Context {
@@ -69,7 +85,17 @@ export class ProcessorExecutor {
       Buffer.from(this.service.config.processorKey, 'base64'),
       raw.subarray(0, 12),
     );
-    c.setAAD(Buffer.from(this.service.config.clientId + '|' + row.id));
+    c.setAAD(
+      Buffer.from(
+        this.service.config.clientId +
+          '|' +
+          row.id +
+          '|' +
+          row.operation_name +
+          '|' +
+          row.resource_key,
+      ),
+    );
     c.setAuthTag(raw.subarray(-16));
     const ctx = decode(Buffer.concat([c.update(raw.subarray(12, -16)), c.final()]));
     if (ctx.configHash !== this.configHash())
@@ -97,7 +123,7 @@ export class ProcessorExecutor {
       await r.body?.cancel();
       throw new Error('Unresolved provider result');
     }
-    if (!r.ok) {
+    if (r.status !== 200) {
       await r.body?.cancel();
       throw new Error('Processor transport rejected');
     }
@@ -132,7 +158,11 @@ export class ProcessorExecutor {
       value.psp_reference.length > 256
     )
       throw new Error('Invalid processor decision');
-    if (value.version !== undefined && typeof value.version !== 'number' && typeof value.version !== 'bigint')
+    if (
+      value.version !== undefined &&
+      typeof value.version !== 'number' &&
+      typeof value.version !== 'bigint'
+    )
       throw new Error('Provider version must be an integer');
     if (value.terminal !== undefined && typeof value.terminal !== 'boolean')
       throw new Error('Provider terminal must be boolean');
@@ -141,15 +171,26 @@ export class ProcessorExecutor {
       throw new Error('Invalid provider version');
     if (value.state === 'REJECTED' && op !== 'initRefund') {
       const name =
-        op === 'payout' ? 'PayoutCallbackStateDetail' : op === 'capture' ? undefined : 'StateReasonCode';
+        op === 'payout'
+          ? 'PayoutCallbackStateDetail'
+          : op === 'capture'
+            ? undefined
+            : 'StateReasonCode';
       if (name)
-        this.service.contract.validate(value.detail, this.service.contract.spec.components.schemas[name]);
+        this.service.contract.validate(
+          value.detail,
+          this.service.contract.spec.components.schemas[name],
+        );
       else if (!['BANK_SOFT_ERROR', 'BANK_HARD_ERROR'].includes(value.detail))
         throw new Error('Invalid capture decline');
     }
     if (value.actions !== undefined) {
-      if (op !== 'charge' || value.state !== 'PENDING') throw new Error('Actions require a pending charge');
-      this.service.contract.validate(value.actions, this.service.contract.spec.components.schemas.Actions);
+      if (op !== 'charge' || value.state !== 'PENDING')
+        throw new Error('Actions require a pending charge');
+      this.service.contract.validate(
+        value.actions,
+        this.service.contract.spec.components.schemas.Actions,
+      );
       for (const action of value.actions)
         if (action.url) {
           const u = new URL(action.url);
@@ -198,17 +239,30 @@ export class ProcessorExecutor {
       ).rows[0];
     }, false);
   }
-  async execute(op: Json, target: string, body: Json, idem?: string, language = 'en-US'): Promise<Result> {
+  async execute(
+    op: Json,
+    target: string,
+    body: Json,
+    idem?: string,
+    language = 'en-US',
+  ): Promise<Result> {
     if (!idem || idem.length > 256) return this.service.error(op, 400);
     const s = this.service,
       c = s.config,
       name = op.operationId,
       fp = hash(target + '\n' + canonical(body));
     const key = hash(
-      c.clientId + '|' + name + '|' + (['charge', 'payout', 'initRefund'].includes(name) ? body.id : idem),
+      c.clientId +
+        '|' +
+        name +
+        '|' +
+        (['charge', 'payout', 'initRefund'].includes(name) ? body.id : idem),
     );
     let fresh = false;
     const row = await s.store.transaction(async (db) => {
+      await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+        'idem|' + c.clientId + '|' + name + '|' + idem,
+      ]);
       await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [key]);
       const mapping = (
         await db.query(
@@ -230,13 +284,21 @@ export class ProcessorExecutor {
           name === 'payout' ? 'DUPLICATE_REQUEST_ERROR' : 'VALIDATION_ERROR',
         );
       if (!existing) {
+        await db.query('SELECT reference_lock_accounts($1,$2::jsonb)', [c.clientId, encode(body)]);
         await db.query('SAVEPOINT validate_operation');
         const validation = new Service(c, s.store, s.contract, new ValidationAdapter(s.features));
         const result = await validation.executeTx(db, op, target, body, idem, language);
         await db.query('ROLLBACK TO SAVEPOINT validate_operation');
         const localFinal = result.status >= 400 || result.body?.state?.value === 'REJECTED';
         if (localFinal) await validation.executeTx(db, op, target, body, idem, language);
-        const ctx: Context = { operation: name, target, body, idem, language, configHash: this.configHash() };
+        const ctx: Context = {
+          operation: name,
+          target,
+          body,
+          idem,
+          language,
+          configHash: this.configHash(),
+        };
         const resource = s.resourceKey(name, target, body);
         existing = (
           await db.query(
@@ -259,10 +321,13 @@ export class ProcessorExecutor {
         if (!localFinal) {
           const original = ['capture', 'cancel', 'initRefund'].includes(name)
             ? (
-                await db.query(`SELECT * FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2`, [
-                  c.clientId,
-                  name === 'initRefund' ? body.original_transaction_id : resource.slice(7),
-                ])
+                await db.query(
+                  `SELECT * FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2`,
+                  [
+                    c.clientId,
+                    name === 'initRefund' ? body.original_transaction_id : resource.slice(7),
+                  ],
+                )
               ).rows[0]
             : undefined;
           const plan = {
@@ -294,7 +359,7 @@ export class ProcessorExecutor {
     if (row.response_status !== null) {
       if (row.status === 'RECONCILE')
         await s.store.pool.query(
-          "UPDATE provider_intents SET status='PENDING',failures=0,next_attempt_at=now() WHERE id=$1 AND status='RECONCILE'",
+          "UPDATE provider_intents SET status='PENDING',failures=0,recovery_started_at=NULL,next_attempt_at=now() WHERE id=$1 AND status='RECONCILE'",
           [row.id],
         );
       return this.replay(row);
@@ -302,8 +367,9 @@ export class ProcessorExecutor {
     if (fresh) return c.processorPauseAfterPrepare ? { status: 500 } : this.dispatch(row, false);
     const end = Date.now() + c.processorWaitMs;
     do {
-      const ready = (await s.store.pool.query('SELECT * FROM provider_intents WHERE id=$1', [row.id]))
-        .rows[0];
+      const ready = (
+        await s.store.pool.query('SELECT * FROM provider_intents WHERE id=$1', [row.id])
+      ).rows[0];
       if (ready.response_status !== null) return this.replay(ready);
       const claimed = await this.claim(row.id, true);
       if (claimed) return this.dispatch(claimed, true);
@@ -327,12 +393,13 @@ export class ProcessorExecutor {
       return await this.finalize(row, decision);
     } catch {
       await this.service.store.pool.query(
-        `UPDATE provider_intents SET failures=failures+1,status=CASE WHEN failures+1>=$3 THEN 'RECONCILE' ELSE 'UNCERTAIN' END,lease_until=NULL,next_attempt_at=now()+($4*interval '1 millisecond'),last_error='processor_unresolved' WHERE id=$1 AND generation=$2`,
+        `UPDATE provider_intents SET recovery_started_at=COALESCE(recovery_started_at,now()),failures=failures+1,status=CASE WHEN ($3>0 AND failures+1>=$3) OR COALESCE(recovery_started_at,now())<=now()-($5*interval '1 millisecond') THEN 'RECONCILE' ELSE 'UNCERTAIN' END,lease_until=NULL,next_attempt_at=now()+(LEAST(60000,$4*power(2,LEAST(failures,10)))*interval '1 millisecond'),last_error='processor_unresolved' WHERE id=$1 AND generation=$2`,
         [
           row.id,
           row.generation,
           this.service.config.processorMaxFailures,
           this.service.config.processorPollMs,
+          this.service.config.processorBudgetMs,
         ],
       );
       return { status: 500 };
@@ -351,23 +418,35 @@ export class ProcessorExecutor {
             : '/' + ctx.operation,
       );
     return s.store.transaction(async (db) => {
-      const current = (await db.query('SELECT * FROM provider_intents WHERE id=$1 FOR UPDATE', [row.id]))
-        .rows[0];
+      const current = (
+        await db.query('SELECT * FROM provider_intents WHERE id=$1 FOR UPDATE', [row.id])
+      ).rows[0];
       if (current.generation !== row.generation)
         return current.response_status !== null ? this.replay(current) : { status: 500 };
+      await db.query('SELECT reference_lock_accounts($1,$2::jsonb)', [
+        c.clientId,
+        encode(ctx.body),
+      ]);
       await db.query("SELECT set_config('reference.intent_id',$1,true)", [row.id]);
-      if (Number(current.last_provider_version) >= result.version && current.response_status !== null) {
-        await db.query('UPDATE provider_intents SET lease_until=NULL WHERE id=$1 AND generation=$2', [
-          row.id,
-          row.generation,
-        ]);
+      if (
+        Number(current.last_provider_version) >= result.version &&
+        current.response_status !== null
+      ) {
+        await db.query(
+          "UPDATE provider_intents SET lease_until=NULL,next_attempt_at=now()+($3*interval '1 millisecond'),failures=0,recovery_started_at=NULL WHERE id=$1 AND generation=$2",
+          [row.id, row.generation, c.processorPollMs],
+        );
         return this.replay(current);
       }
       if (current.provider_reference && current.provider_reference !== result.psp_reference)
         throw new Error('Processor reference changed');
       let response: Result;
       const kind =
-        ctx.operation === 'initRefund' ? 'refund' : ctx.operation === 'payout' ? 'payout' : 'charge';
+        ctx.operation === 'initRefund'
+          ? 'refund'
+          : ctx.operation === 'payout'
+            ? 'payout'
+            : 'charge';
       const id = ctx.body.id ?? row.resource_key.slice(7);
       const tx = (
         await db.query('SELECT * FROM transactions WHERE client_id=$1 AND kind=$2 AND id=$3', [
@@ -392,13 +471,17 @@ export class ProcessorExecutor {
         updatedAmount = result.amount.value;
       }
       if (current.response_status !== null) {
+        if (!tx) throw new Error('Missing provider transaction');
         if (tx && result.version > Number(current.last_provider_version)) {
           if (tx.state === 'PENDING' && result.state !== 'PENDING')
             await s.complete(db, kind, id, result.state, result.detail, updatedAmount);
           else if (kind === 'refund' && tx.state === 'CONFIRMED' && result.state === 'REJECTED')
             await s.reverseRefund(db, id);
-          else if (tx.state === 'REJECTED' && result.state !== 'REJECTED')
-            throw new Error('Rejected is terminal');
+          else if (
+            tx.state !== result.state &&
+            !(tx.state === 'AUTHORIZED' && result.state === 'CONFIRMED')
+          )
+            throw new Error('Invalid provider transition');
         }
         response = this.replay(current);
       } else {
@@ -410,9 +493,11 @@ export class ProcessorExecutor {
             : result.state === 'REJECTED' && ctx.operation === 'capture'
               ? 422
               : result.state === 'REJECTED' && ctx.operation === 'payout'
-                ? ['VALIDATION_ERROR', 'INVALID_PAYMENT_DETAILS_ERROR', 'INSUFFICIENT_BALANCE'].includes(
-                    result.detail,
-                  )
+                ? [
+                    'VALIDATION_ERROR',
+                    'INVALID_PAYMENT_DETAILS_ERROR',
+                    'INSUFFICIENT_BALANCE',
+                  ].includes(result.detail)
                   ? 400
                   : 422
                 : 200;
@@ -443,13 +528,14 @@ export class ProcessorExecutor {
         [c.clientId, kind, id, result.state === 'PENDING' ? 'PROVIDER_WAIT' : 'DONE'],
       );
       const pending =
-        result.state === 'PENDING' || (kind === 'refund' && result.state === 'CONFIRMED' && !result.terminal);
+        result.state === 'PENDING' ||
+        (kind === 'refund' && result.state === 'CONFIRMED' && !result.terminal);
       await db.query('UPDATE provider_intents SET provider_reference=$2 WHERE id=$1', [
         row.id,
         result.psp_reference,
       ]);
       await db.query(
-        `UPDATE provider_intents SET status=$3,last_provider_version=$4,lease_until=NULL,next_attempt_at=now()+($5*interval '1 millisecond'),response_status=COALESCE(response_status,$6),response_body=COALESCE(response_body,$7),response_headers=CASE WHEN response_status IS NULL THEN $8::jsonb ELSE response_headers END,last_error=NULL,failures=0,updated_at=now() WHERE id=$1 AND generation=$2`,
+        `UPDATE provider_intents SET status=$3,last_provider_version=$4,lease_until=NULL,next_attempt_at=now()+($5*interval '1 millisecond'),response_status=COALESCE(response_status,$6),response_body=COALESCE(response_body,$7),response_headers=CASE WHEN response_status IS NULL THEN $8::jsonb ELSE response_headers END,last_error=NULL,failures=0,recovery_started_at=NULL,updated_at=now() WHERE id=$1 AND generation=$2`,
         [
           row.id,
           row.generation,
@@ -502,12 +588,14 @@ export class ProcessorExecutor {
     if (!row) throw new Failure(404);
     const result = this.decision(row.operation_name, value);
     const claimed = await this.service.store.transaction(async (db) => {
-      const current = (await db.query('SELECT * FROM provider_intents WHERE id=$1 FOR UPDATE', [row.id]))
-        .rows[0];
+      const current = (
+        await db.query('SELECT * FROM provider_intents WHERE id=$1 FOR UPDATE', [row.id])
+      ).rows[0];
       if (result.version <= Number(current.last_provider_version)) return;
       if (current.provider_reference && current.provider_reference !== result.psp_reference)
         throw new Failure(400);
-      if (current.lease_until && new Date(current.lease_until).getTime() > Date.now()) throw new Failure(503);
+      if (current.lease_until && new Date(current.lease_until).getTime() > Date.now())
+        throw new Failure(503);
       return (
         await db.query(
           "UPDATE provider_intents SET generation=generation+1,lease_until=now()+($2*interval '1 millisecond') WHERE id=$1 RETURNING *",

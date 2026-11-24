@@ -23,7 +23,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 FORMAT = "uberpay-reference-settlement-jsonl-v1"
-MAX_ENTRIES = 100000
+MAX_ENTRIES = int(os.getenv("SETTLEMENT_MAX_ENTRIES", "100000"))
 MAX_FILE_BYTES = 64 * 1024 * 1024
 
 
@@ -82,7 +82,10 @@ def render(client, window, rows):
         raise ValueError("Reference export limit exceeded; split the reporting period")
     batch_id = sha(canonical([FORMAT, client, utc(window.start), utc(window.end)]))
     files, descriptions = [], []
-    for source, entries in sorted(group_by_source(rows).items()):
+    groups = group_by_source(rows)
+    for source in filter(None, os.getenv("SETTLEMENT_SOURCE_IDS", "").split(",")):
+        groups.setdefault(source, [])
+    for source, entries in sorted(groups.items()):
         encoded, totals = [], defaultdict(int)
         for entry in sorted(
             entries,
@@ -193,7 +196,7 @@ class SettlementStore:
         with self.connect() as c:
             c.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
-                ("settlement|" + client,),
+                ("settlement-export|" + client,),
             )
             window.validate(
                 c.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
@@ -209,6 +212,22 @@ class SettlementStore:
                 (client, window.end, window.start),
             ).fetchone():
                 raise ValueError("Reporting periods must not overlap a sealed batch")
+            # Wait for pre-boundary producers, then immediately let new commits
+            # proceed. All new journal stamps are AFTER this already-closed end.
+            # A separate exporter-only xact lock serializes overlapping seals.
+            c.execute(
+                "SELECT pg_advisory_lock(hashtextextended(%s,0))",
+                ("settlement|" + client,),
+            )
+            try:
+                window.validate(
+                    c.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+                )
+            finally:
+                c.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended(%s,0))",
+                    ("settlement|" + client,),
+                )
             rows = c.execute(
                 "SELECT * FROM settlement_entries WHERE client_id=%s AND occurred_at>=%s AND occurred_at<%s ORDER BY occurred_at,tx_kind,tx_id,event_type LIMIT %s",
                 (client, window.start, window.end, MAX_ENTRIES + 1),
@@ -284,6 +303,19 @@ def verify_batch(batch):
             or file["sha256"] != item["sha256"]
         ):
             raise ValueError("File checksum or identity mismatch")
+        lines = [json.loads(line) for line in file["content"].splitlines()]
+        totals = defaultdict(int)
+        for line in lines:
+            if line["source_account_id"] != item["source_account_id"]:
+                raise ValueError("Line source mismatch")
+            totals[line["currency"]] += int(line["amount_e5"])
+        expected = {k: str(v) for k, v in sorted(totals.items())}
+        if (
+            len(lines) != item["entries"]
+            or len(lines) != file.get("entry_count", file.get("entries"))
+            or expected != item["net_e5_by_currency"]
+        ):
+            raise ValueError("File totals or line counts mismatch")
     return batch
 
 
@@ -314,6 +346,11 @@ class DirectorySink:
                         out.write(data)
                         out.flush()
                         os.fsync(out.fileno())
+                fd = os.open(temporary, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
                 try:
                     temporary.rename(target)
                 except OSError:
@@ -329,6 +366,11 @@ class DirectorySink:
             expected
         ):
             raise ValueError("Destination identity/file list mismatch")
+        fd = os.open(self.root, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
         for name, data in expected.items():
             path = target / name
             if path.is_symlink() or not path.is_file():
@@ -351,9 +393,10 @@ def main():
     p.add_argument(
         "--date",
         type=date.fromisoformat,
-        required=True,
-        help="Closed UTC day, YYYY-MM-DD",
+        help="Closed UTC day, YYYY-MM-DD (or specify --start and --end)",
     )
+    p.add_argument("--start", type=datetime.fromisoformat)
+    p.add_argument("--end", type=datetime.fromisoformat)
     p.add_argument("--output", default=".local/settlement")
     p.add_argument(
         "--sftp-config",
@@ -362,11 +405,21 @@ def main():
     args = p.parse_args()
     if not args.database_url:
         p.error("Local DATABASE_URL required")
-    start = datetime.combine(args.date, datetime.min.time(), timezone.utc)
-    store = SettlementStore(args.database_url)
-    batch = store.seal(
-        args.client_id, SettlementWindow(start, start + timedelta(days=1))
+    if (
+        args.date
+        and (args.start or args.end)
+        or not args.date
+        and not (args.start and args.end)
+    ):
+        p.error("Specify either --date or both --start and --end")
+    start = (
+        datetime.combine(args.date, datetime.min.time(), timezone.utc)
+        if args.date
+        else args.start
     )
+    end = start + timedelta(days=1) if args.date else args.end
+    store = SettlementStore(args.database_url)
+    batch = store.seal(args.client_id, SettlementWindow(start, end))
     sink, destination = (
         DirectorySink(args.output),
         "directory:" + str(Path(args.output).resolve()),
@@ -399,6 +452,9 @@ if __name__ == "__main__":
                 {
                     "error": "reference_settlement_failed",
                     "category": type(error).__name__,
+                    "reason": str(error)
+                    if isinstance(error, ValueError)
+                    else "Database or transport failure; inspect operator diagnostics",
                 }
             ),
             file=sys.stderr,

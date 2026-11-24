@@ -492,6 +492,27 @@
         "BRL"
       ],
       "callback_mode": "charge"
+    },
+    "DEMO_REFUND_SYNC_REVERSAL": {
+      "behavior": "refund_sync_reversal",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_POINTS": {
+      "behavior": "sync",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge",
+      "points": true
     }
   },
   "translations": {
@@ -517,10 +538,10 @@
       "deny": "Negar",
       "reject": "Rejeitar",
       "method": "Forma de pagamento",
-      "country": "País",
-      "scopes": "Permissões solicitadas",
+      "country": "Pa\u00eds",
+      "scopes": "Permiss\u00f5es solicitadas",
       "synthetic": "Somente saldo simulado",
-      "invalid_request": "Solicitação inválida",
+      "invalid_request": "Solicita\u00e7\u00e3o inv\u00e1lida",
       "amount": "Valor (E5)"
     }
   },

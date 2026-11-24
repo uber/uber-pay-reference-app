@@ -54,7 +54,7 @@ The harness launches native processes, signs the exact request bytes, validates 
 | `POST /payout` | Sync or pending payout and callback |
 | `GET /authorize`, `POST /token` | Explicit demo consent; code, refresh and wallet grants |
 
-Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows, not an automatic routing rule for ordinary charges. Accepted U11 selects routing explicitly per asynchronous funding profile; it is not inferred from funding-code strings.
+Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are **upstream-deprecated**, opt-in legacy callbacks, exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows, not an automatic routing rule for ordinary charges. Accepted U11 selects routing explicitly per asynchronous funding profile; it is not inferred from funding-code strings.
 
 Demo profiles include sync/pending/reject, WebView/QR, capture hard/soft decline, refund pending rejection/late reversal, itemized meal-voucher balance, and a separate deposit flow. `contracts/reference-features.json` declares every profile plus triggers for all 14 charge and 10 payout callback reasons. These are local controls, **not** Uber-assigned funding codes. Demo accounts use BRL and begin with synthetic E5 balances. The HTTP contract uses integer E5 amounts, never floating-point money.
 
@@ -79,7 +79,7 @@ The clone is self-contained: the API pin and documented local compatibility prof
 
 Read [the integration guide](docs/psp-integration.md) and [architecture](docs/architecture.md). Use the native [durable HTTP processor executor](docs/processor-executor.md) to exercise the network boundary against an independent local fixture, then map your actual processor/wallet systems to that boundary. Follow the accepted reference profile and map it explicitly to the actual counterparty contract before external effects. There is intentionally no runnable real-money adapter, fabricated user authentication, production deployment or a real-counterparty settlement agreement.
 
-U1–U15 are accepted reference-project choices in [the decision register](contracts/decisions.json), with rationale and executable evidence. The derived runtime explicitly adds CANCELLED lookup and supports one partial capture with remainder release; the upstream pin is unchanged. Project design acceptance is not Uber sandbox/production certification. See [owner decisions](docs/owner-decisions.md).
+U1–U15 are accepted reference-project choices in [the decision register](contracts/decisions.json), with rationale and executable evidence. The derived runtime offers opt-in CANCELLED lookup (default wire status REJECTED) and supports one partial capture with remainder release; the upstream pin is unchanged. Project design acceptance is not Uber sandbox/production certification. See [owner decisions](docs/owner-decisions.md).
 
 The [reference settlement workflow](docs/settlement.md) seals immutable per-source JSONL reports and a checksummed manifest, then publishes atomically to a private directory or strict-host-key loopback SFTP. Upload receipts are not financial acceptance or a claim that Uber uses this reference format.
 
@@ -90,3 +90,15 @@ This is an intentional replacement of the old deposit-only UI. Its source is rec
 Native build/unit and full shared conformance results are recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md). Docker builds and Uber sandbox certification are separate checks; do not infer either from passing native tests. No real transactions, credentials or customer data belong in CI.
 
 License: [Apache-2.0](LICENSE). See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+
+### November 24 review qualification
+
+Default lookup maps cancelled/expired authorizations to upstream `REJECTED`;
+`ENABLE_CANCELLED_LOOKUP=true` explicitly enables the reference-only extension.
+`STRICT_DESCRIPTION_PATTERN=true` opts into upstream's example-conflicting regex.
+New partners use the three current callbacks; the other three deposit callbacks
+are **upstream-deprecated**, opt-in legacy examples. See
+[review dispositions](docs/review-2026-11-24.md),
+[operator re-drive and elapsed retry budgets](docs/operations.md), and
+[published-example/field mapping](docs/psp-integration.md).

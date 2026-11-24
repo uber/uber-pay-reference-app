@@ -16,3 +16,5 @@ DROP FUNCTION IF EXISTS reference_next_event(TEXT,TEXT,TEXT);
 DROP FUNCTION IF EXISTS reference_reverse_refund(TEXT,TEXT);
 DROP TABLE IF EXISTS intent_reservations, resource_claims, provider_keys, provider_intents,
  refund_reversals, account_debts, tokens, jobs, operations, transactions, accounts;
+DROP TABLE IF EXISTS operator_actions;
+DROP FUNCTION IF EXISTS reference_lock_accounts(TEXT,JSONB);

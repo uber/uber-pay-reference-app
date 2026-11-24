@@ -7,6 +7,16 @@ import org.springframework.context.annotation.Bean;
 
 @SpringBootApplication
 public class Application {
+  @Bean
+  org.springframework.boot.web.servlet.FilterRegistrationBean<BoundedBodyFilter> boundedBody() {
+    var filter =
+        new org.springframework.boot.web.servlet.FilterRegistrationBean<>(new BoundedBodyFilter());
+    filter.setAsyncSupported(true);
+    filter.setDispatcherTypes(jakarta.servlet.DispatcherType.REQUEST);
+    filter.setOrder(Integer.MIN_VALUE);
+    return filter;
+  }
+
   public static void main(String[] args) {
     Config c = new Config(System.getenv());
     SpringApplication app = new SpringApplication(Application.class);
@@ -44,6 +54,12 @@ public class Application {
       ((com.fasterxml.jackson.databind.node.ArrayNode)
               ct.spec.path("components").path("schemas").path("Account").path("required"))
           .add("name");
+    if (c.strictDescription) {
+      var desc =
+          (com.fasterxml.jackson.databind.node.ObjectNode)
+              ct.spec.path("components").path("schemas").path("TransactionDescription");
+      desc.set("pattern", desc.get("x-upstream-pattern"));
+    }
     return ct;
   }
 

@@ -3,6 +3,7 @@ package gateway
 import (
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -14,6 +15,9 @@ import (
 )
 
 type Config struct {
+	ReturnURLs                                                                                []string
+	StrictDescription, CancelledLookup                                                        bool
+	CallbackBudget, ProcessorBudget                                                           time.Duration
 	ProcessorPauseAfterPrepare                                                                bool
 	ProcessorMode, ProcessorURL, ProcessorToken, ProcessorKey                                 string
 	ProcessorTimeout, ProcessorLease, ProcessorWait, ProcessorPoll                            time.Duration
@@ -85,9 +89,12 @@ func LoadConfig() (Config, error) {
 			return c, e
 		}
 	}
+	if c.ProcessorLease < 2*c.ProcessorTimeout+500*time.Millisecond {
+		return c, errors.New("processor lease must cover lookup and dispatch deadlines")
+	}
 	var pe error
-	c.ProcessorMaxFailures, pe = strconv.Atoi(env("PROCESSOR_MAX_FAILURES", "8"))
-	if pe != nil || c.ProcessorMaxFailures < 1 {
+	c.ProcessorMaxFailures, pe = strconv.Atoi(env("PROCESSOR_MAX_FAILURES", "0"))
+	if pe != nil || c.ProcessorMaxFailures < 0 {
 		return c, errors.New("invalid processor budget")
 	}
 	c.Host = env("HOST", "127.0.0.1")
@@ -130,9 +137,23 @@ func LoadConfig() (Config, error) {
 	for _, v := range strings.Split(env("ALLOWED_REDIRECT_URIS", "http://127.0.0.1:9090/return,uber://ubercash_topup"), ",") {
 		c.Redirects[strings.TrimSpace(v)] = true
 	}
+	c.ReturnURLs = strings.Split(env("RETURN_URL_ALLOWLIST", "uber://payments/,uber://ubercash_topup,http://127.0.0.1:9090/return"), ",")
+	c.StrictDescription = env("STRICT_DESCRIPTION_PATTERN", "false") == "true"
+	c.CancelledLookup = env("ENABLE_CANCELLED_LOOKUP", "false") == "true"
+	c.CallbackBudget, e = duration("CALLBACK_RETRY_BUDGET_MS", "86400000", time.Millisecond)
+	if e != nil {
+		return c, e
+	}
+	c.ProcessorBudget, e = duration("PROCESSOR_RETRY_BUDGET_MS", "86400000", time.Millisecond)
+	if e != nil {
+		return c, e
+	}
 	c.MaxSkew, e = duration("SIGNATURE_MAX_SKEW_SECONDS", "300", time.Second)
 	if e != nil {
 		return c, e
+	}
+	if c.MaxSkew > time.Hour {
+		return c, errors.New("excessive signature skew")
 	}
 	c.AsyncDelay, e = duration("ASYNC_DELAY_MS", "500", time.Millisecond)
 	if e != nil {
@@ -142,12 +163,12 @@ func LoadConfig() (Config, error) {
 	if e != nil {
 		return c, e
 	}
-	c.Retry, e = duration("CALLBACK_RETRY_MS", "200", time.Millisecond)
+	c.Retry, e = duration("CALLBACK_RETRY_MS", "1000", time.Millisecond)
 	if e != nil {
 		return c, e
 	}
-	c.MaxAttempts, e = strconv.Atoi(env("CALLBACK_MAX_ATTEMPTS", "5"))
-	if e != nil || c.MaxAttempts < 1 || c.MaxAttempts > 100 {
+	c.MaxAttempts, e = strconv.Atoi(env("CALLBACK_MAX_ATTEMPTS", "0"))
+	if e != nil || c.MaxAttempts < 0 || c.MaxAttempts > 100 {
 		return c, errors.New("invalid callback attempt limit")
 	}
 	c.ProcessorPauseAfterPrepare = env("ENABLE_TEST_CONTROL", "false") == "true" && env("PROCESSOR_TEST_PAUSE_AFTER_PREPARE", "false") == "true"
@@ -177,6 +198,30 @@ func LoadConfig() (Config, error) {
 		return c, e
 	}
 	c.Keys = map[string]*rsa.PublicKey{env("UBER_KEY_ID", "demo-uber-key"): key}
+	if manifest := env("UBER_SIGNING_KEYS_FILE", ""); manifest != "" {
+		raw, e := os.ReadFile(manifest)
+		if e != nil {
+			return c, e
+		}
+		var files map[string]string
+		if e = json.Unmarshal(raw, &files); e != nil {
+			return c, e
+		}
+		for id, file := range files {
+			if id == "" {
+				return c, errors.New("empty signing key ID")
+			}
+			raw, e := os.ReadFile(file)
+			if e != nil {
+				return c, e
+			}
+			key, e := ParsePublicKey(raw)
+			if e != nil {
+				return c, e
+			}
+			c.Keys[id] = key
+		}
+	}
 	return c, nil
 }
 func httpClient() *http.Client {

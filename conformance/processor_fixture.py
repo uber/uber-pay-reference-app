@@ -11,6 +11,7 @@ import socket
 import sqlite3
 import tempfile
 import threading
+import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,10 +32,13 @@ class ProcessorFixture:
         self.barriers = deque()
         self.drop_responses = 0
         self.lookups = []
+        self.posts = []
+        self.unavailable_until = 0
+        self.responses = deque()
         with self.db() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS operations (
                 client TEXT, key TEXT, command_hash TEXT, operation TEXT, resource TEXT,
-                funding TEXT, decision TEXT, effects INTEGER NOT NULL DEFAULT 1,
+                funding TEXT, decision TEXT, effects INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(client,key))""")
         self.server = ThreadingHTTPServer(("127.0.0.1", port), self.handler())
         self.server.daemon_threads = True
@@ -137,9 +141,27 @@ class ProcessorFixture:
                     return None
                 return self.headers.get("X-Reference-Client", ""), parts[2]
 
+            def fault(self):
+                with fixture.lock:
+                    status = (
+                        fixture.responses.popleft()
+                        if fixture.responses
+                        else (
+                            503
+                            if time.monotonic() < fixture.unavailable_until
+                            else None
+                        )
+                    )
+                if status:
+                    self.reply(status)
+                    return True
+                return False
+
             def do_GET(self):
                 identity = self.identity()
                 if identity is None:
+                    return
+                if self.fault():
                     return
                 with fixture.db() as db:
                     entry = db.execute(
@@ -155,6 +177,10 @@ class ProcessorFixture:
             def do_POST(self):
                 identity = self.identity()
                 if identity is None:
+                    return
+                with fixture.lock:
+                    fixture.posts.append(identity)
+                if self.fault():
                     return
                 size = int(self.headers.get("Content-Length", 0))
                 if not 0 < size <= 1048576:
@@ -236,7 +262,7 @@ class ProcessorFixture:
                             if detail and state == "REJECTED":
                                 result["detail"] = detail
                             db.execute(
-                                "INSERT INTO operations(client,key,command_hash,operation,resource,funding,decision) VALUES(?,?,?,?,?,?,?)",
+                                "INSERT INTO operations(client,key,command_hash,operation,resource,funding,decision,effects) VALUES(?,?,?,?,?,?,?,0)",
                                 (
                                     *identity,
                                     digest,
@@ -245,6 +271,10 @@ class ProcessorFixture:
                                     funding,
                                     json.dumps(result),
                                 ),
+                            )
+                            db.execute(
+                                "UPDATE operations SET effects=effects+1 WHERE client=? AND key=?",
+                                identity,
                             )
                     with fixture.lock:
                         barrier = (

@@ -24,7 +24,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     if (!Number.isSafeInteger(n) || n < min) throw new Error(`Invalid ${key}`);
     return n;
   };
-  if (get('MODE', 'local') !== 'local') throw new Error('Only local synthetic-money mode is implemented');
+  if (get('MODE', 'local') !== 'local')
+    throw new Error('Only local synthetic-money mode is implemented');
   const root = resolve(get('REPO_ROOT', '.'));
   const basePath = get('BASE_PATH', '/uberpay/v1');
   if (!/^\/[A-Za-z0-9/_-]*[A-Za-z0-9_-]$/.test(basePath)) throw new Error('Invalid BASE_PATH');
@@ -32,7 +33,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     .toString()
     .replace(/\/$/, '');
   const tokenUrl = localUrl(get('UBER_TOKEN_URL', 'http://127.0.0.1:9090/oauth/token')).toString();
-  const publicBase = localUrl(get('PUBLIC_BASE_URL', `http://127.0.0.1:${get('PORT', '8080')}${basePath}`))
+  const publicBase = localUrl(
+    get('PUBLIC_BASE_URL', `http://127.0.0.1:${get('PORT', '8080')}${basePath}`),
+  )
     .toString()
     .replace(/\/$/, '');
   const publicKey = readFileSync(
@@ -42,6 +45,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const key = createPublicKey(publicKey);
   if (key.asymmetricKeyType !== 'rsa' || (key.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) {
     throw new Error('A valid RSA public key of at least 2048 bits is required');
+  }
+  const signingKeys: Record<string, string> = { [get('UBER_KEY_ID', 'demo-uber-key')]: publicKey };
+  if (env.UBER_SIGNING_KEYS_FILE) {
+    const files = JSON.parse(readFileSync(resolve(root, env.UBER_SIGNING_KEYS_FILE), 'utf8'));
+    for (const [id, file] of Object.entries(files)) {
+      if (!id || typeof file !== 'string') throw new Error('Invalid signing key manifest');
+      const pem = readFileSync(resolve(root, file), 'utf8'),
+        parsed = createPublicKey(pem);
+      if (
+        parsed.asymmetricKeyType !== 'rsa' ||
+        (parsed.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
+      )
+        throw new Error('Invalid signing key');
+      signingKeys[id] = pem;
+    }
   }
   const databaseUrl = get('DATABASE_URL', 'postgresql://uberpay:uberpay@127.0.0.1:5432/uberpay');
   const database = new URL(databaseUrl);
@@ -53,7 +71,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const processorMode = get('PROCESSOR_MODE', 'local');
   if (!['local', 'http'].includes(processorMode)) throw new Error('Invalid PROCESSOR_MODE');
-  const processorUrl = localUrl(get('PROCESSOR_URL', 'http://127.0.0.1:9080')).toString().replace(/\/$/, '');
+  const processorUrl = localUrl(get('PROCESSOR_URL', 'http://127.0.0.1:9080'))
+    .toString()
+    .replace(/\/$/, '');
   const processorToken = get('PROCESSOR_AUTH_TOKEN', '');
   const processorKey = get('PROCESSOR_STATE_KEY', '');
   if (
@@ -62,12 +82,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       Buffer.from(processorKey, 'base64').length !== 32 ||
       Buffer.from(processorKey, 'base64').toString('base64') !== processorKey)
   )
-    throw new Error('HTTP processor requires explicit credentials and a persistent 256-bit state key');
+    throw new Error(
+      'HTTP processor requires explicit credentials and a persistent 256-bit state key',
+    );
   const clientId = get('CLIENT_ID', 'demo-client');
   const enableControl = get('ENABLE_TEST_CONTROL', 'false') === 'true';
   const controlSecret = get('TEST_CONTROL_SECRET', '');
   if (enableControl && controlSecret.length < 16)
     throw new Error('Test control requires a random secret of at least 16 characters');
+  if (int('PROCESSOR_LEASE_MS', '15000') < 2 * int('PROCESSOR_TIMEOUT_MS', '2000') + 500)
+    throw new Error('Processor lease must cover lookup and dispatch deadlines');
+  const clientSecret = get('CLIENT_SECRET', 'demo-secret');
+  if (
+    ![
+      clientId,
+      clientSecret,
+      get('UBER_CLIENT_ID', 'demo-uber-client'),
+      get('UBER_CLIENT_SECRET', 'demo-uber-secret'),
+    ].every(Boolean)
+  )
+    throw new Error('Client identities and secrets must not be empty');
+  if (int('SIGNATURE_MAX_SKEW_SECONDS', '300') > 3600) throw new Error('Excessive signature skew');
   return {
     root,
     basePath,
@@ -75,6 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     tokenUrl,
     publicBase,
     publicKey,
+    signingKeys,
     clientId,
     processorMode,
     processorUrl,
@@ -84,25 +120,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     processorLeaseMs: int('PROCESSOR_LEASE_MS', '15000'),
     processorWaitMs: int('PROCESSOR_WAIT_MS', '250'),
     processorPollMs: int('PROCESSOR_POLL_MS', '200'),
-    processorMaxFailures: int('PROCESSOR_MAX_FAILURES', '8'),
+    processorMaxFailures: int('PROCESSOR_MAX_FAILURES', '0', 0),
+    processorBudgetMs: int('PROCESSOR_RETRY_BUDGET_MS', '86400000'),
     port: int('PORT', '8080'),
     host: get('HOST', '127.0.0.1'),
     databaseUrl,
     contractFile: get('CONTRACT_FILE', 'contracts/runtime.json'),
     migrationFile: resolve(root, get('MIGRATION_FILE', 'storage/migrations/001_init.sql')),
     keyId: get('UBER_KEY_ID', 'demo-uber-key'),
-    clientSecret: get('CLIENT_SECRET', 'demo-secret'),
+    clientSecret,
     uberClientId: get('UBER_CLIENT_ID', 'demo-uber-client'),
     uberClientSecret: get('UBER_CLIENT_SECRET', 'demo-uber-secret'),
     allowedRedirects: get(
       'ALLOWED_REDIRECT_URIS',
       'http://127.0.0.1:9090/return,uber://ubercash_topup',
     ).split(','),
+    returnUrls: get(
+      'RETURN_URL_ALLOWLIST',
+      'uber://payments/,uber://ubercash_topup,http://127.0.0.1:9090/return',
+    ).split(','),
+    strictDescription: get('STRICT_DESCRIPTION_PATTERN', 'false') === 'true',
+    cancelledLookup: get('ENABLE_CANCELLED_LOOKUP', 'false') === 'true',
+    callbackBudgetMs: int('CALLBACK_RETRY_BUDGET_MS', '86400000'),
     skewSeconds: int('SIGNATURE_MAX_SKEW_SECONDS', '300'),
     asyncDelayMs: int('ASYNC_DELAY_MS', '500', 0),
     workerIntervalMs: int('WORKER_INTERVAL_MS', '100'),
-    maxAttempts: int('CALLBACK_MAX_ATTEMPTS', '5'),
-    retryMs: int('CALLBACK_RETRY_MS', '200'),
+    maxAttempts: int('CALLBACK_MAX_ATTEMPTS', '0', 0),
+    retryMs: int('CALLBACK_RETRY_MS', '1000'),
     enableControl,
     controlSecret,
     processorPauseAfterPrepare:

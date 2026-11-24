@@ -119,7 +119,7 @@ func (a *App) processorContext(o Object) (Object, error) {
 	if e != nil {
 		return nil, e
 	}
-	b, e = a.processorCrypt(str(o, "id"), b, true)
+	b, e = a.processorCrypt(str(o, "id")+"|"+str(o, "operation_name")+"|"+str(o, "resource_key"), b, true)
 	if e != nil {
 		return nil, e
 	}
@@ -149,7 +149,9 @@ func (a *App) processorRemote(key string, body any) (Object, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.Config.ProcessorToken)
 	req.Header.Set("X-Reference-Client", a.Config.ClientID)
-	res, e := a.Client.Do(req)
+	client := *a.Client
+	client.Timeout = 2 * a.Config.ProcessorTimeout
+	res, e := client.Do(req)
 	if e != nil {
 		return nil, e
 	}
@@ -254,6 +256,9 @@ func (a *App) processorExecute(r *http.Request, pattern, op, id string, b Object
 		return Reply{}, e
 	}
 	defer tx.Rollback(ctx)
+	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "idem|"+a.Config.ClientID+"|"+op+"|"+key); e != nil {
+		return Reply{}, e
+	}
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", intent); e != nil {
 		return Reply{}, e
 	}
@@ -276,6 +281,9 @@ func (a *App) processorExecute(r *http.Request, pattern, op, id string, b Object
 		return a.processorConflict(pattern, op), nil
 	}
 	if current == nil {
+		if _, e = tx.Exec(ctx, "SELECT reference_lock_accounts($1,$2::jsonb)", a.Config.ClientID, encode(b)); e != nil {
+			return Reply{}, e
+		}
 		if _, e = tx.Exec(ctx, "SAVEPOINT processor_validate"); e != nil {
 			return Reply{}, e
 		}
@@ -305,7 +313,7 @@ func (a *App) processorExecute(r *http.Request, pattern, op, id string, b Object
 			response = reply.Body
 		}
 		request := Object{"operation": op, "template": pattern, "target": r.URL.RequestURI(), "id": id, "body": b, "idem": key, "language": locale(r.Header.Get("Accept-Language")), "config_hash": a.processorConfigHash()}
-		encrypted, e := a.processorCrypt(intent, []byte(encode(request)), false)
+		encrypted, e := a.processorCrypt(intent+"|"+op+"|"+resourceKey(op, id, b), []byte(encode(request)), false)
 		if e != nil {
 			return Reply{}, e
 		}
@@ -355,7 +363,7 @@ func (a *App) processorExecute(r *http.Request, pattern, op, id string, b Object
 	}
 	if current["response_status"] != nil {
 		if str(current, "status") == "RECONCILE" {
-			if _, e = a.Store.Pool.Exec(ctx, "UPDATE provider_intents SET status='PENDING',failures=0,next_attempt_at=now() WHERE id=$1 AND status='RECONCILE'", current["id"]); e != nil {
+			if _, e = a.Store.Pool.Exec(ctx, "UPDATE provider_intents SET status='PENDING',failures=0,recovery_started_at=NULL,next_attempt_at=now() WHERE id=$1 AND status='RECONCILE'", current["id"]); e != nil {
 				return Reply{}, e
 			}
 		}
@@ -421,7 +429,7 @@ func (a *App) processorDispatch(o Object, lookup bool) Reply {
 	if e == nil {
 		return result
 	}
-	_, err := a.Store.Pool.Exec(context.Background(), "UPDATE provider_intents SET failures=failures+1,status=CASE WHEN failures+1>=$3 THEN 'RECONCILE' ELSE 'UNCERTAIN' END,lease_until=NULL,next_attempt_at=now()+($4*interval '1 millisecond'),last_error='processor_unresolved' WHERE id=$1 AND generation=$2", o["id"], o["generation"], a.Config.ProcessorMaxFailures, a.Config.ProcessorPoll.Milliseconds())
+	_, err := a.Store.Pool.Exec(context.Background(), "UPDATE provider_intents SET recovery_started_at=COALESCE(recovery_started_at,now()),failures=failures+1,status=CASE WHEN ($3>0 AND failures+1>=$3) OR COALESCE(recovery_started_at,now())<=now()-($5*interval '1 millisecond') THEN 'RECONCILE' ELSE 'UNCERTAIN' END,lease_until=NULL,next_attempt_at=now()+(LEAST(60000,$4*power(2,LEAST(failures,10)))*interval '1 millisecond'),last_error='processor_unresolved' WHERE id=$1 AND generation=$2", o["id"], o["generation"], a.Config.ProcessorMaxFailures, a.Config.ProcessorPoll.Milliseconds(), a.Config.ProcessorBudget.Milliseconds())
 	if err != nil {
 		log.Print("processor unresolved; durable lease retained")
 	}
@@ -475,12 +483,15 @@ func (a *App) processorFinalize(o, result Object) (Reply, error) {
 	if str(current, "provider_reference") != "" && str(current, "provider_reference") != str(result, "psp_reference") {
 		return Reply{}, errors.New("provider reference changed")
 	}
+	if _, e = tx.Exec(ctx, "SELECT reference_lock_accounts($1,$2::jsonb)", a.Config.ClientID, encode(object(saved["body"]))); e != nil {
+		return Reply{}, e
+	}
 	if _, e = tx.Exec(ctx, "SELECT set_config('reference.intent_id',$1,true)", str(o, "id")); e != nil {
 		return Reply{}, e
 	}
 	version := integer(result, "version")
 	if current["response_status"] != nil && version <= integer(current, "last_provider_version") {
-		_, e = tx.Exec(ctx, "UPDATE provider_intents SET lease_until=NULL WHERE id=$1", o["id"])
+		_, e = tx.Exec(ctx, "UPDATE provider_intents SET lease_until=NULL,next_attempt_at=now()+($2*interval '1 millisecond'),failures=0,recovery_started_at=NULL WHERE id=$1", o["id"], a.Config.ProcessorPoll.Milliseconds())
 		if e != nil {
 			return Reply{}, e
 		}
@@ -600,7 +611,7 @@ func (a *App) processorFinalize(o, result Object) (Reply, error) {
 	if _, e = tx.Exec(ctx, "UPDATE jobs SET status=$4 WHERE client_id=$1 AND tx_kind=$2 AND tx_id=$3 AND job_type='COMPLETION' AND status IN ('PENDING','WAITING','PROVIDER_WAIT')", a.Config.ClientID, kind, id, completion); e != nil {
 		return Reply{}, e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE provider_intents SET status=$3,last_provider_version=GREATEST(last_provider_version,$4),provider_reference=$5,lease_until=NULL,next_attempt_at=now()+($6*interval '1 millisecond'),response_status=COALESCE(response_status,$7),response_body=COALESCE(response_body,$8),response_headers=CASE WHEN response_status IS NULL THEN $9::jsonb ELSE response_headers END,last_error=NULL,failures=0,updated_at=now() WHERE id=$1 AND generation=$2", o["id"], o["generation"], state, version, result["psp_reference"], a.Config.ProcessorPoll.Milliseconds(), reply.Status, reply.Body, encode(reply.Headers)); e != nil {
+	if _, e = tx.Exec(ctx, "UPDATE provider_intents SET status=$3,last_provider_version=GREATEST(last_provider_version,$4),provider_reference=$5,lease_until=NULL,next_attempt_at=now()+($6*interval '1 millisecond'),response_status=COALESCE(response_status,$7),response_body=COALESCE(response_body,$8),response_headers=CASE WHEN response_status IS NULL THEN $9::jsonb ELSE response_headers END,last_error=NULL,failures=0,recovery_started_at=NULL,updated_at=now() WHERE id=$1 AND generation=$2", o["id"], o["generation"], state, version, result["psp_reference"], a.Config.ProcessorPoll.Milliseconds(), reply.Status, reply.Body, encode(reply.Headers)); e != nil {
 		return Reply{}, e
 	}
 	if str(result, "state") == "PENDING" {

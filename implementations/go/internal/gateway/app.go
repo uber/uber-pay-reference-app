@@ -57,6 +57,10 @@ func NewWithDependencies(ctx context.Context, c Config, adapter PspAdapter, wall
 		schema := object(object(object(v)["components"])["schemas"])["Account"]
 		object(schema)["required"] = append(object(schema)["required"].([]any), "name")
 	}
+	if c.StrictDescription {
+		schema := object(object(object(object(v)["components"])["schemas"])["TransactionDescription"])
+		schema["pattern"] = schema["x-upstream-pattern"]
+	}
 	features, e := LoadFeatures()
 	if e != nil {
 		return nil, e
@@ -160,7 +164,31 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var ok bool
 		body, ok = v.(map[string]any)
+		if op == "createToken" {
+			grant, valid := body["grant_type"].(string)
+			if !valid || grant == "" {
+				a.write(w, Reply{Status: 400, Body: encode(Object{"error": "invalid_request"})})
+				return
+			}
+			if grant != "authorization_code" && grant != "refresh_token" && grant != "urn:uberpay:params:oauth:grant-type:wallet-grant" {
+				a.write(w, Reply{Status: 400, Body: encode(Object{"error": "unsupported_grant_type"})})
+				return
+			}
+		}
 		if !ok || a.Contract.Request(pattern, "post", body) != nil {
+			a.write(w, a.failure(pattern, 400, "VALIDATION_ERROR"))
+			return
+		}
+	}
+	if op == "charge" {
+		if value, ok := body["return_url"]; ok && !a.Config.allowedReturn(str(Object{"v": value}, "v")) {
+			a.write(w, a.failure(pattern, 400, "VALIDATION_ERROR"))
+			return
+		}
+	}
+	if value, ok := body["id"]; ok {
+		id, valid := value.(string)
+		if !valid || id == "" || len(id) > 256 {
 			a.write(w, a.failure(pattern, 400, "VALIDATION_ERROR"))
 			return
 		}
@@ -449,7 +477,7 @@ func (a *App) execute(ctx context.Context, tx pgx.Tx, op, id string, b Object, r
 			return Reply{}, err
 		}
 		t.State = provider.State
-		out := Object{"id": t.ID, "merchant_reference": t.Ref, "status": t.State, "amount": Object{"value": t.Amount, "currency": t.Currency}}
+		out := Object{"id": t.ID, "merchant_reference": t.Ref, "status": map[bool]string{true: "REJECTED", false: t.State}[t.State == "CANCELLED" && !a.Config.CancelledLookup], "amount": Object{"value": t.Amount, "currency": t.Currency}}
 		if t.State == "CONFIRMED" {
 			out["confirmed_at"] = t.Updated.UTC().Format(time.RFC3339Nano)
 		}
@@ -467,7 +495,7 @@ func (a *App) create(ctx context.Context, tx pgx.Tx, kind string, b Object, hash
 		return a.failure(path, 400, "VALIDATION_ERROR"), nil
 	}
 	id := str(b, "id")
-	if id == "" || len(id) > 512 {
+	if id == "" || len(id) > 256 {
 		return a.failure(path, 400, "VALIDATION_ERROR"), nil
 	}
 	old, e := getTransaction(ctx, tx, a.Config.ClientID, kind, id)
@@ -749,7 +777,11 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 		return Reply{}, err
 	}
 	t.State = result.State
-	t.Response = encode(Object{"status": t.State, "merchant_reference": t.Ref})
+	out := Object{"status": t.State, "merchant_reference": t.Ref}
+	if t.State == "REJECTED" {
+		out["failed_reason"] = "Local synthetic rejection"
+	}
+	t.Response = encode(out)
 	if e = insertTransaction(ctx, tx, a.Config.ClientID, t); e != nil {
 		return Reply{}, e
 	}
@@ -757,6 +789,12 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 		e = adjust(ctx, tx, a.Config.ClientID, t.Account, c, n, n)
 	} else if t.State == "PENDING" {
 		e = queue(ctx, tx, a.Config.ClientID, "refund", id, "COMPLETION", "", Object{"state": map[bool]string{true: result.FinalState, false: "CONFIRMED"}[result.FinalState != ""], "detail": result.FinalDetail}, "PENDING", a.Config.AsyncDelay)
+	}
+	if e == nil && t.State == "CONFIRMED" && a.Config.ProcessorMode != "http" {
+		p, _ := DecodeJSON([]byte(original.Profile))
+		if str(object(p), "behavior") == "refund_sync_reversal" {
+			e = queue(ctx, tx, a.Config.ClientID, "refund", id, "REVERSAL", "", Object{}, "PENDING", a.Config.AsyncDelay)
+		}
 	}
 	return Reply{201, t.Response, nil}, e
 }

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { checkedAmount, decode, encode, fingerprint, hash, MAX_INT64, type Json } from './codec.js';
 import { Contract, ContractError } from './contract.js';
@@ -39,12 +40,15 @@ export class Service {
     if (status >= 500 && !operation?.responses?.[String(status)]) return { status: 500 };
     if (!operation?.responses?.[String(status)]) status = 400;
     const response = operation?.responses?.[String(status)];
-    const schema = response && this.contract.dereference(response).content?.['application/json']?.schema;
+    const schema =
+      response && this.contract.dereference(response).content?.['application/json']?.schema;
     const body = schema
       ? operation.operationId === 'createToken'
         ? {
             error:
-              detail.startsWith('invalid_') || detail.startsWith('unsupported_') ? detail : 'invalid_request',
+              detail.startsWith('invalid_') || detail.startsWith('unsupported_')
+                ? detail
+                : 'invalid_request',
           }
         : { detail }
       : undefined;
@@ -61,7 +65,11 @@ export class Service {
         [hash(authorization.slice(7)), this.config.clientId],
       );
       const token = rows.rows[0];
-      if (!token || !token.scope.split(' ').includes(scope) || (account && token.account_id !== account)) {
+      if (
+        !token ||
+        !token.scope.split(' ').includes(scope) ||
+        (account && token.account_id !== account)
+      ) {
         throw new Failure(401);
       }
       return token;
@@ -75,7 +83,9 @@ export class Service {
     idem: string | undefined,
     language = 'en-US',
   ): Promise<Result> {
-    return this.store.transaction((db) => this.executeTx(db, operation, target, body, idem, language));
+    return this.store.transaction((db) =>
+      this.executeTx(db, operation, target, body, idem, language),
+    );
   }
 
   async executeTx(
@@ -92,11 +102,10 @@ export class Service {
     const fp = fingerprint(target, body);
     if (needsKey) {
       const found = (
-        await db.query('SELECT * FROM operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3', [
-          this.config.clientId,
-          name,
-          idem,
-        ])
+        await db.query(
+          'SELECT * FROM operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3',
+          [this.config.clientId, name, idem],
+        )
       ).rows[0];
       if (found)
         return found.fingerprint === fp
@@ -115,11 +124,15 @@ export class Service {
     await db.query('SAVEPOINT operation_effect');
     let result: Result;
     try {
+      if (name === 'createToken' && (typeof body.grant_type !== 'string' || !body.grant_type))
+        throw new Failure(400, 'invalid_request');
       if (
         name === 'createToken' &&
-        !['authorization_code', 'refresh_token', 'urn:uberpay:params:oauth:grant-type:wallet-grant'].includes(
-          body.grant_type,
-        )
+        ![
+          'authorization_code',
+          'refresh_token',
+          'urn:uberpay:params:oauth:grant-type:wallet-grant',
+        ].includes(body.grant_type)
       ) {
         throw new Failure(400, 'unsupported_grant_type');
       }
@@ -259,7 +272,11 @@ export class Service {
   ): Promise<Result> {
     const source = kind === 'charge' ? body.source?.id : body.payer?.id;
     if (typeof source !== 'string' || !source) throw new Failure(400);
-    const profile = this.features.method(body.funding_method, body.country_iso2, body.amount?.currency);
+    const profile = this.features.method(
+      body.funding_method,
+      body.country_iso2,
+      body.amount?.currency,
+    );
     if (typeof body.id !== 'string' || !body.id || body.id.length > 256) throw new Failure(400);
     const old = (
       await db.query('SELECT * FROM transactions WHERE client_id=$1 AND kind=$2 AND id=$3', [
@@ -294,7 +311,8 @@ export class Service {
       if (Object.hasOwn(declines, payee)) throw new Failure(422, declines[payee]);
       await this.account(db, payee, body.amount.currency);
     }
-    const accountId = kind === 'charge' ? (body.authorization?.account_id ?? 'demo-account') : body.payer.id;
+    const accountId =
+      kind === 'charge' ? (body.authorization?.account_id ?? 'demo-account') : body.payer.id;
     const account = await this.account(db, accountId, body.amount.currency);
     let decision;
     decision = await this.adapter[kind](body, hash(`${kind}:${body.id}`));
@@ -305,7 +323,9 @@ export class Service {
     if (kind === 'payout' && decision.state === 'REJECTED') {
       const detail = decision.detail ?? 'PAYMENT_ERROR';
       throw new Failure(
-        ['VALIDATION_ERROR', 'INVALID_PAYMENT_DETAILS_ERROR', 'INSUFFICIENT_BALANCE'].includes(detail)
+        ['VALIDATION_ERROR', 'INVALID_PAYMENT_DETAILS_ERROR', 'INSUFFICIENT_BALANCE'].includes(
+          detail,
+        )
           ? 400
           : 422,
         detail,
@@ -316,7 +336,13 @@ export class Service {
     if (decision.detail) result.state.detail = decision.detail;
     const state = manual && decision.state === 'CONFIRMED' ? 'AUTHORIZED' : decision.state;
     if (state !== 'REJECTED')
-      await this.ledger(db, accountId, body.amount.currency, -amount, state === 'CONFIRMED' ? -amount : 0n);
+      await this.ledger(
+        db,
+        accountId,
+        body.amount.currency,
+        -amount,
+        state === 'CONFIRMED' ? -amount : 0n,
+      );
     const payload: Json = {
       state: decision.finalState ?? 'CONFIRMED',
       detail: decision.finalDetail,
@@ -326,7 +352,8 @@ export class Service {
     };
     if (kind === 'payout') decision.userAction = undefined;
     if (decision.userAction) {
-      payload.payment_token = randomBytes(32).toString('hex');
+      const paymentToken = randomBytes(32).toString('hex');
+      payload.payment_token_hash = hash(paymentToken);
       payload.csrf = randomBytes(32).toString('hex');
       payload.expires_at = Date.now() + this.config.actionTtlMs;
       result.actions =
@@ -334,13 +361,13 @@ export class Service {
           ? [
               {
                 type: decision.userAction,
-                url: `${new URL(this.config.publicBase).origin}/demo/pay?token=${payload.payment_token}`,
+                url: `${new URL(this.config.publicBase).origin}/demo/pay?token=${paymentToken}`,
               },
             ]
           : [
               {
                 type: decision.userAction,
-                code: `local-qr:${payload.payment_token}`,
+                code: `local-qr:${paymentToken}`,
                 expiry_time_millis: BigInt(payload.expires_at),
               },
             ];
@@ -377,14 +404,14 @@ export class Service {
         encode(profile),
       ],
     );
-    const orderId = body.payment_data?.find((item: Json) => item.type === 'order_payment_data')?.order_id;
+    const orderId = body.payment_data?.find(
+      (item: Json) => item.type === 'order_payment_data',
+    )?.order_id;
     if (orderId)
-      await db.query('UPDATE transactions SET order_id=$4 WHERE client_id=$1 AND kind=$2 AND id=$3', [
-        this.config.clientId,
-        kind,
-        body.id,
-        orderId,
-      ]);
+      await db.query(
+        'UPDATE transactions SET order_id=$4 WHERE client_id=$1 AND kind=$2 AND id=$3',
+        [this.config.clientId, kind, body.id, orderId],
+      );
     if (kind === 'payout' && state === 'CONFIRMED')
       await this.ledger(db, body.payee.account.account_id, body.amount.currency, amount, amount);
     if (state === 'PENDING') {
@@ -435,12 +462,10 @@ export class Service {
     }
     if (capture.state !== 'CONFIRMED') throw new Error('Unexpected capture decision');
     await this.ledger(db, tx.account_id, tx.currency, tx.amount_e5 - amount, -amount);
-    await db.query('UPDATE transactions SET amount_e5=$4 WHERE client_id=$1 AND kind=$2 AND id=$3', [
-      this.config.clientId,
-      tx.kind,
-      tx.id,
-      amount.toString(),
-    ]);
+    await db.query(
+      'UPDATE transactions SET amount_e5=$4 WHERE client_id=$1 AND kind=$2 AND id=$3',
+      [this.config.clientId, tx.kind, tx.id, amount.toString()],
+    );
     await this.setState(db, tx, 'CONFIRMED');
     return { status: 200 };
   }
@@ -450,7 +475,10 @@ export class Service {
     await this.expire(db, tx, false);
     if (tx.state !== 'AUTHORIZED') throw new Failure(409, 'INVALID_CHARGE_STATE');
     if (body.psp_reference && body.psp_reference !== tx.psp_reference) throw new Failure(400);
-    await this.adapter.cancel({ id: tx.id, psp_reference: tx.psp_reference }, hash(`cancel:${tx.id}`));
+    await this.adapter.cancel(
+      { id: tx.id, psp_reference: tx.psp_reference },
+      hash(`cancel:${tx.id}`),
+    );
     await this.ledger(db, tx.account_id, tx.currency, tx.amount_e5, 0n);
     await this.setState(db, tx, 'CANCELLED');
     return { status: 200 };
@@ -470,7 +498,10 @@ export class Service {
     }
     const original = await this.transaction(db, 'charge', body.original_transaction_id);
     if (!original.source_account_id) throw new Failure(400);
-    if (original.psp_reference !== body.original_merchant_reference || original.state !== 'CONFIRMED')
+    if (
+      original.psp_reference !== body.original_merchant_reference ||
+      original.state !== 'CONFIRMED'
+    )
       throw new Failure(400);
     const amount = this.amount(body.amount.value);
     if (body.amount.currency !== original.currency) throw new Failure(400);
@@ -488,8 +519,10 @@ export class Service {
     );
     const pending = decision.state === 'PENDING';
     const state = decision.state;
-    const result = { status: state, merchant_reference: `node-refund-${randomUUID()}` };
-    if (state === 'CONFIRMED') await this.ledger(db, original.account_id, original.currency, amount, amount);
+    const result: Json = { status: state, merchant_reference: `node-refund-${randomUUID()}` };
+    if (state === 'REJECTED') result.failed_reason = 'Local synthetic rejection';
+    if (state === 'CONFIRMED')
+      await this.ledger(db, original.account_id, original.currency, amount, amount);
     await db.query(
       `INSERT INTO transactions(client_id,kind,id,psp_reference,original_id,account_id,amount_e5,currency,
        funding_method,state,request_hash,response_status,response_body)
@@ -512,6 +545,12 @@ export class Service {
       `UPDATE transactions SET source_account_id=$3,reference_profile=$4 WHERE client_id=$1 AND kind='refund' AND id=$2`,
       [this.config.clientId, body.id, original.source_account_id, original.reference_profile],
     );
+    if (
+      state === 'CONFIRMED' &&
+      this.config.processorMode !== 'http' &&
+      decode(original.reference_profile).behavior === 'refund_sync_reversal'
+    )
+      await this.queue(db, 'refund', body.id, 'REVERSAL', '', {});
     if (pending)
       await this.queue(db, 'refund', body.id, 'COMPLETION', '', {
         state: decision.finalState ?? 'CONFIRMED',
@@ -534,7 +573,7 @@ export class Service {
     const body: Json = {
       id: tx.id,
       merchant_reference: tx.psp_reference,
-      status: tx.state,
+      status: tx.state === 'CANCELLED' && !this.config.cancelledLookup ? 'REJECTED' : tx.state,
       amount: { value: tx.amount_e5, currency: tx.currency },
     };
     if (tx.state === 'CONFIRMED') body.confirmed_at = tx.updated_at.toISOString();
@@ -546,7 +585,11 @@ export class Service {
     const a = await this.account(db, body.account_id, p.currencies[0]);
     return {
       status: 200,
-      body: this.adapter.getBalance({ ...a, payment_data: body.payment_data, itemized: p.itemized }),
+      body: this.adapter.getBalance({
+        ...a,
+        payment_data: body.payment_data,
+        itemized: p.itemized,
+      }),
     };
   }
 
@@ -588,8 +631,13 @@ export class Service {
   ): Promise<void> {
     const sequence =
       jobType === 'CALLBACK'
-        ? ((await db.query('SELECT reference_next_event($1,$2,$3) AS n', [this.config.clientId, kind, id]))
-            .rows[0].n ?? 0n)
+        ? ((
+            await db.query('SELECT reference_next_event($1,$2,$3) AS n', [
+              this.config.clientId,
+              kind,
+              id,
+            ])
+          ).rows[0].n ?? 0n)
         : 0n;
     const jobId = hash(`${this.config.clientId}:${kind}:${id}:${jobType}:${name}:${sequence}`);
     await db.query(
@@ -672,15 +720,21 @@ export class Service {
         });
       return;
     }
-    const name = kind === 'refund' ? 'updateRefund' : kind === 'payout' ? 'payoutCallback' : 'chargeCallback';
+    const name =
+      kind === 'refund' ? 'updateRefund' : kind === 'payout' ? 'payoutCallback' : 'chargeCallback';
     const payload: Json =
       kind === 'refund'
         ? {
             status: state,
             merchant_reference: tx.psp_reference,
-            ...(detail ? { failed_reason: 'Synthetic refund rejected by the local processor' } : {}),
+            ...(detail
+              ? { failed_reason: 'Synthetic refund rejected by the local processor' }
+              : {}),
           }
-        : { state: { value: state, ...(detail ? { detail } : {}) }, psp_reference: tx.psp_reference };
+        : {
+            state: { value: state, ...(detail ? { detail } : {}) },
+            psp_reference: tx.psp_reference,
+          };
     this.contract.callback(name, id, payload);
     await this.queue(db, kind, id, 'CALLBACK', name, payload);
     if (
@@ -694,14 +748,18 @@ export class Service {
 
   async reverseRefund(db: Connection, id: string): Promise<void> {
     const changed = (
-      await db.query('SELECT reference_reverse_refund($1,$2) AS changed', [this.config.clientId, id])
+      await db.query('SELECT reference_reverse_refund($1,$2) AS changed', [
+        this.config.clientId,
+        id,
+      ])
     ).rows[0].changed;
     if (changed) {
       const tx = await this.transaction(db, 'refund', id);
       await this.queue(db, 'refund', id, 'CALLBACK', 'updateRefund', {
         status: 'REJECTED',
         merchant_reference: tx.psp_reference,
-        failed_reason: 'Synthetic processor reversed the refund; any unrecovered funds are recorded as debt',
+        failed_reason:
+          'Synthetic processor reversed the refund; any unrecovered funds are recorded as debt',
       });
     }
   }
@@ -725,7 +783,9 @@ export class Service {
   ): Promise<string> {
     const token = randomBytes(32).toString('base64url');
     const seconds =
-      kind === 'ACCESS' || kind === 'CODE' || kind === 'CONSENT' ? 600 : this.config.refreshTtlSeconds;
+      kind === 'ACCESS' || kind === 'CODE' || kind === 'CONSENT'
+        ? 600
+        : this.config.refreshTtlSeconds;
     await db.query(
       `INSERT INTO tokens(token_hash,kind,client_id,account_id,scope,redirect_uri,state,expires_at,family_id)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
@@ -744,7 +804,11 @@ export class Service {
     return token;
   }
 
-  async authorize(query: Json): Promise<{ consent: string; csrf: string; locale: string; details: Json }> {
+  async authorize(
+    query: Json,
+  ): Promise<{ consent: string; csrf: string; locale: string; details: Json }> {
+    if (query.response_type && query.response_type !== 'code')
+      throw new Failure(400, 'unsupported_response_type');
     if (
       query.client_id !== this.config.clientId ||
       query.response_type !== 'code' ||
@@ -771,15 +835,22 @@ export class Service {
       if (d.account_id && d.account_id !== 'demo-account') throw new Failure(400);
     }
     const csrf = randomBytes(32).toString('hex');
-    const consent = await this.store.transaction((db) =>
-      this.issue(
-        db,
-        'CONSENT',
-        scope,
-        'demo-account',
-        query.redirect_uri,
-        encode({ state: query.state, csrf, details, locale: this.features.locale(details[0].locale) }),
-      ),
+    const consent = await this.store.transaction(
+      (db) =>
+        this.issue(
+          db,
+          'CONSENT',
+          scope,
+          'demo-account',
+          query.redirect_uri,
+          encode({
+            state: query.state,
+            csrf,
+            details,
+            locale: this.features.locale(details[0].locale),
+          }),
+        ),
+      false,
     );
     return { consent, csrf, details, locale: this.features.locale(details[0].locale) };
   }
@@ -876,7 +947,15 @@ export class Service {
       return {
         status: 200,
         body: {
-          access_token: await this.issue(db, 'ACCESS', scope, account, null, consentContext, family),
+          access_token: await this.issue(
+            db,
+            'ACCESS',
+            scope,
+            account,
+            null,
+            consentContext,
+            family,
+          ),
           token_type: 'bearer',
           expires_in: '600',
         },
@@ -885,7 +964,15 @@ export class Service {
     return {
       status: 200,
       body: {
-        refresh_token: await this.issue(db, 'REFRESH', scope, account, null, consentContext, family),
+        refresh_token: await this.issue(
+          db,
+          'REFRESH',
+          scope,
+          account,
+          null,
+          consentContext,
+          family,
+        ),
         token_type: 'bearer',
         scope,
         expires_in: String(this.config.refreshTtlSeconds),
@@ -893,8 +980,10 @@ export class Service {
           {
             type: 'authorized_account',
             account_id: account,
-            fingerprint: hash(account),
-            display_name: 'Local demo wallet',
+            fingerprint: createHmac('sha256', this.config.clientSecret)
+              .update('uberpay-instrument-v1|' + account)
+              .digest('hex'),
+            display_name: body.wallet_reference_data?.display_name || 'Local demo wallet',
           },
         ],
       },

@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"net/http"
@@ -53,13 +56,19 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) {
 		u, _ := url.Parse(q.Get("redirect_uri"))
 		p := u.Query()
 		p.Set("error", code)
-		p.Set("state", q.Get("state"))
+		if q.Has("state") {
+			p.Set("state", q.Get("state"))
+		}
 		u.RawQuery = p.Encode()
 		w.Header().Set("Location", u.String())
 		w.WriteHeader(302)
 	}
 	if !validScopes(q.Get("scope")) {
 		bad("invalid_scope")
+		return
+	}
+	if q.Get("response_type") != "" && q.Get("response_type") != "code" {
+		bad("unsupported_response_type")
 		return
 	}
 	if q.Get("response_type") != "code" || q.Get("state") == "" || len(q.Get("state")) > 2048 {
@@ -84,7 +93,7 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx := r.Context()
-	tx, e := a.Store.Begin(ctx)
+	tx, e := a.Store.Pool.Begin(ctx)
 	if e != nil {
 		w.WriteHeader(500)
 		return
@@ -102,7 +111,7 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	token, e := a.putToken(ctx, tx, "CONSENT", identity.AccountID, q.Get("scope"), q.Get("redirect_uri"), encode(Object{"state": q.Get("state"), "locale": language, "details": arr}), 5*time.Minute)
+	token, e := a.putToken(ctx, tx, "CONSENT", identity.AccountID, q.Get("scope"), q.Get("redirect_uri"), encode(Object{"state": q.Get("state"), "locale": language, "details": arr}), 10*time.Minute)
 	if e != nil || tx.Commit(ctx) != nil {
 		w.WriteHeader(500)
 		return
@@ -292,7 +301,14 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 	if grant != "refresh_token" {
 		out["refresh_token"] = refresh
 		out["scope"] = scope
-		out["authorization_details"] = []any{Object{"type": "authorized_account", "account_id": account, "fingerprint": "demo-fingerprint", "display_name": "Demo wallet"}}
+		mac := hmac.New(sha256.New, []byte(a.Config.ClientSecret))
+		mac.Write([]byte("uberpay-instrument-v1|" + account))
+		display := str(object(b["wallet_reference_data"]), "display_name")
+		if display == "" {
+			display = "Local demo wallet"
+		}
+		out["expires_in"] = strconv.FormatInt(int64(a.Config.RefreshTTL/time.Second), 10)
+		out["authorization_details"] = []any{Object{"type": "authorized_account", "account_id": account, "fingerprint": hex.EncodeToString(mac.Sum(nil)), "display_name": display}}
 	}
 	if family != "" && refresh != "" {
 		if _, e = tx.Exec(ctx, "UPDATE tokens SET family_id=$1 WHERE token_hash=$2", family, fingerprint(refresh)); e != nil {
@@ -350,6 +366,8 @@ func (a *App) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -414,7 +432,7 @@ func (a *App) action(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
-	if target := str(object(content), "return_url"); a.Config.Redirects[target] {
+	if target := str(object(content), "return_url"); a.Config.allowedReturn(target) {
 		w.Header().Set("Location", target)
 		w.WriteHeader(302)
 		return

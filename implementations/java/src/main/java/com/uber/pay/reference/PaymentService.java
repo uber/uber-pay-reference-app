@@ -91,6 +91,8 @@ final class PaymentService {
       String language)
       throws Exception {
 
+    if (!Set.of("charge", "capture", "cancel", "initRefund", "payout").contains(operation))
+      idem = null;
     String fingerprint = Json.hash(resource + "\n" + Json.string(Json.canonical(body)));
     if (idem != null) {
       if (idem.isBlank() || idem.length() > 256)
@@ -277,6 +279,10 @@ final class PaymentService {
 
   private Reply create(Connection c, String kind, JsonNode b, String hash, String language)
       throws Exception {
+    if (!b.path("id").isTextual()
+        || b.path("id").asText().isEmpty()
+        || b.path("id").asText().length() > 256)
+      throw new ApiError(400, "VALIDATION_ERROR", "Invalid transaction id");
     String source =
         kind.equals("charge")
             ? b.path("source").path("id").asText()
@@ -362,7 +368,7 @@ final class PaymentService {
     completion.put("locale", ReferenceFeatures.locale(language));
     boolean action = kind.equals("charge") && decision.action();
     if (action) {
-      completion.put("payment_token", actionToken);
+      completion.put("payment_token_hash", Json.hash(actionToken));
       completion.put("csrf", csrf);
       completion.put("expires_at", System.currentTimeMillis() + config.actionTtlMs);
       completion.put("return_url", Json.text(b, "return_url"));
@@ -562,6 +568,7 @@ final class PaymentService {
         && !q.get("merchant_reference").equals(snapshot.reference()))
       throw new ApiError(404, "VALIDATION_ERROR", "Reference mismatch");
     String status = snapshot.state();
+    if (status.equals("CANCELLED") && !config.cancelledLookup) status = "REJECTED";
     ObjectNode out =
         Json.obj(
             "id",
@@ -616,8 +623,25 @@ final class PaymentService {
             new PspAdapter.RefundCommand(funding, n, remaining, b), providerKey("refund", id));
     String state = decision.state();
     Reply response =
-        Reply.json(201, Json.obj("status", state, "merchant_reference", ref("refund", id)));
+        Reply.json(
+            201,
+            state.equals("REJECTED")
+                ? Json.obj(
+                    "status",
+                    state,
+                    "merchant_reference",
+                    ref("refund", id),
+                    "failed_reason",
+                    "Local synthetic rejection")
+                : Json.obj("status", state, "merchant_reference", ref("refund", id)));
     String acc = Database.str(original, "account_id");
+    if (state.equals("CONFIRMED")
+        && !config.processorMode.equals("http")
+        && Json.parse(Database.str(original, "reference_profile"))
+            .path("behavior")
+            .asText()
+            .equals("refund_sync_reversal"))
+      queue(c, "refund", id, "REVERSAL", "", Json.obj(), "PENDING", config.delay);
     if (state.equals("CONFIRMED")) adjust(c, acc, cur, n, n);
     insert(
         c,

@@ -23,8 +23,8 @@ The supplied demo adapters intentionally make no external calls. Their ledger an
 All U1–U15 reference-project decisions are accepted and implemented in
 `contracts/decisions.json`; they are not a pending reference engineering backlog.
 `contracts/errata.json` describes exact differences from the unchanged upstream
-pin. U4 adds CANCELLED to the derived runtime enum; communicate/map that additive
-value when integrating a strict consumer. U5 permits one partial capture, releases
+pin. U4 now maps cancelled/expired authorizations to REJECTED by default; only
+`ENABLE_CANCELLED_LOOKUP=true` enables the reference-only CANCELLED response. U5 permits one partial capture, releases
 the unused hold and limits refunds to actual captured funds. A reference choice
 does not establish that a particular deployed Uber consumer has accepted an
 extension. Preserve the upstream pin and qualify the chosen real integration.
@@ -52,3 +52,66 @@ actual counterpart's format mapping, host/key/credentials and business acceptanc
 process; do not claim that the reference format is Uber's bilateral file format.
 A live deployment needs its own privacy/security/financial review, retention,
 reconciliation and incident handling. The reference has no live-data migration.
+
+
+## 6. Published examples and deprecated surface
+
+New integrations use `chargeCallback`, `payoutCallback` and `updateRefund`.
+`confirmDeposit`, `cancelDeposit`, `updateDeposit` are **upstream-deprecated**:
+`DEMO_DEPOSIT`/`callback_mode=deposit` is an opt-in legacy compatibility example
+for partners already on those callbacks, not a new-integration recommendation.
+Also deprecated: `session_id`, charge-response `merchant_reference`/`metadata`,
+`updateDeposit.metadata`, and every Account/AccountOwner/Deposit `uri` field.
+Informational deprecated URI fields are strings; they cannot choose a wallet or
+redirect. Deprecated charge-response fields are not emitted.
+
+The literal Authentication curl also omits required `id` and `authorization`.
+The stored golden fixture preserves those omissions; the executable acceptance
+case supplies them and replaces BOLETO with a configured code. The gateway does
+not invent transaction IDs or authorization. Default descriptions accept Unicode
+and punctuation, retaining type/maxLength256. `STRICT_DESCRIPTION_PATTERN=true`
+restores the upstream pattern. Merchant/points business rules apply only to their
+funding profiles (`DEMO_MEAL_VOUCHER`, `DEMO_POINTS`), never unrelated charges.
+The voucher fixture allowlist is demo-merchant / demo-merchant-secret only.
+
+## 7. Redirect, signing, and transport deployment requirements
+
+OAuth `ALLOWED_REDIRECT_URIS` is exact registration (including query), intentionally
+stricter than upstream guidance. Register any changed Uber redirect before use.
+Payment `RETURN_URL_ALLOWLIST` is separate: scheme, authority/port and path (a
+trailing slash permits that subtree), never the query. The original allowed URL,
+including its correlation query, is returned verbatim after approve or deny.
+Unknown schemes, credentials, fragments and unlisted authorities fail closed.
+Keep HTTP entries loopback-only in this local reference. Add reviewed HTTPS/deep
+link entries rather than a wildcard. `uber://payments/` is a synthetic example,
+not an assertion of every Uber application's registered scheme.
+
+Proxies must preserve the externally signed **Host and complete raw path/query**,
+including BASE_PATH. Do not rewrite them or trust arbitrary X-Forwarded-* values.
+Buffer/rate-limit incoming uploads and public consent requests at the edge.
+Java additionally uses asynchronous bounded raw-body buffering with a total10s
+deadline so slow bodies do not occupy all request threads. Local mode remains
+non-production. `UBER_SIGNING_KEYS_FILE` optionally names a JSON object mapping
+key IDs to PEM paths for overlapping RSA signing-key rotation; the legacy single
+key stays configured. Reject unknown key IDs and remove old keys only after the
+agreed overlap. Never commit private keys.
+
+## 8. Fields a real PSP must map
+
+| Request data | Required adopter responsibility; synthetic behavior |
+|---|---|
+| source.id, destination, all owner_id fields | Resolve registered settlement/routing/customer identities. Without access-token authorization the demo debits demo-account regardless of source.id; source.id is reporting metadata, not wallet authority. |
+| destination_owner and payee name/local_name/DOB/address/document | Use verified identity/KYC and appropriate consent/prefill. Demo forwards but does not certify these fields. Real RUT/CUIT check digits must be validated; invalid details map to400 INVALID_PAYMENT_DETAILS_ERROR. |
+| description, initiated_at | Persist/reference according to PSP policy; do not use client timestamps as ledger authority. Escape text in any presentation. |
+| order_payment_data/order_refund_data | Correlate order/refund identifiers and validate their relationship. Demo retains order_id and forwards full input, not a full order/KYC system. |
+| wallet_reference_data.display_name | Return supplied label when present, otherwise Local demo wallet. Instrument fingerprint is domain-separated HMAC of synthetic instrument identity under local client secret; real adapters need a stable dedicated secret and canonical underlying-instrument identity across Uber accounts. |
+| offline_access | Accepted scope; refresh token is always issued on code/wallet grants because the response schema requires it. It does not bypass consent/account/scope binding. |
+
+`find-transaction` intentionally covers charge/refund, not payouts. Whether Uber
+requires payout lookup, and whether two async updateRefund calls are accepted,
+remain **external onboarding questions**, not claims answered by this repo.
+Use the synchronous-confirmed/single-reversal-callback example by default.
+See `docs/operations.md` for elapsed retries, safe re-drive and retention boundaries.
+Do not hot-switch Node/Go/Java on one client's live database: their durable
+fingerprint/reference encodings are not a cross-language storage migration ABI.
+Use isolated client namespaces/database volumes or preserve the originating runtime.

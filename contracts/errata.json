@@ -42,9 +42,10 @@
     {
       "id": "lookup-status",
       "kind": "accepted reference decision",
-      "reason": "Return200 with status CANCELLED for cancelled or expired authorizations. Add this value explicitly to the derived reference runtime schema, not the unchanged upstream pin.",
+      "reason": "Return200 REJECTED for cancelled/expired authorizations by default, with no confirmed_at. ENABLE_CANCELLED_LOOKUP=true opts into the explicit CANCELLED derived-runtime extension. Internal state remains CANCELLED.",
       "decision": "U4",
-      "status": "accepted"
+      "status": "accepted",
+      "review_decision": "D1"
     },
     {
       "id": "payout-rejection",
@@ -62,7 +63,7 @@
     {
       "id": "callback-routing",
       "kind": "accepted reference decision",
-      "reason": "Only an explicitly configured asynchronous charge funding profile with callback_mode=deposit uses confirm/cancel/updateDeposit. Ordinary charge uses chargeCallback; refund and payout keep their own callbacks. Amount may only decrease before confirmation; queue update before confirm.",
+      "reason": "Explicit funding-profile callback routing: new integrations use chargeCallback. Only legacy, opt-in deposit profiles use the upstream-deprecated confirmDeposit/cancelDeposit/updateDeposit. A reduced amount update precedes confirmation.",
       "decision": "U11",
       "status": "accepted"
     },
@@ -126,8 +127,9 @@
       "id": "refund-request-response",
       "kind": "accepted reference decision",
       "decision": "U13",
-      "reason": "Use original_transaction_id, original_merchant_reference and CurrencyAmount. Return201 CONFIRMED/PENDING/REJECTED. Ordered late rejection reverses a confirmed refund once; unrecovered funds become explicit debt without consuming other holds.",
-      "status": "accepted"
+      "reason": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
+      "status": "accepted",
+      "review_decision": "D2"
     },
     {
       "id": "payout-conflict",
@@ -142,6 +144,56 @@
       "decision": "U15",
       "reason": "Closed UTC periods, daily by default; immutable confirmation/reversal journal; one canonical JSONL file per source account and a checksummed manifest; decimal-string signed E5 and per-currency totals. Seal once, reject overlaps, replay bytes. Atomic directory or strict-host-key local SFTP publication occurs outside SQL; transport receipt is not financial acceptance.",
       "status": "accepted"
+    },
+    {
+      "id": "description-example-pattern",
+      "kind": "accepted reference decision",
+      "decision": "D3",
+      "reason": "Relax only TransactionDescription.pattern by default; retain x-upstream-pattern for explicit strict opt-in, type and maxLength256. Published authentication example includes punctuation forbidden by its pattern.",
+      "status": "accepted"
+    },
+    {
+      "id": "deprecated-informational-uri",
+      "kind": "request compatibility",
+      "reason": "Validate deprecated Account.uri, AccountOwner.uri and Deposit.uri as strings, not absolute URIs. The published example uses a network-path reference. Do not relax real action or redirect URL policy.",
+      "status": "accepted"
+    },
+    {
+      "id": "published-charge-example-incomplete",
+      "kind": "upstream example discrepancy",
+      "reason": "The literal authentication curl body also omits schema-required id and authorization, beyond the three R6 causes. Preserve it as a fixture and reject it unchanged; golden interoperability case supplies these two required fields and substitutes only the assigned funding method. Never derive a money identity or authorization from an informational field.",
+      "status": "documented"
+    },
+    {
+      "id": "refund-reversal-callback-count",
+      "kind": "external clarification",
+      "decision": "D2",
+      "reason": "Reversal itself is explicitly allowed. Synchronous201 CONFIRMED followed by a single REJECTED callback is the recommended reference example. The opt-in asynchronous CONFIRMED then REJECTED two-call example awaits external confirmation of the callback-count wording. No Uber answer has been received.",
+      "status": "pending external confirmation"
+    },
+    {
+      "id": "oauth-exact-redirect-registration",
+      "kind": "security policy",
+      "reason": "Retain exact OAuth redirect_uri registration despite upstream discouraging allowlisting. Uber redirect changes must be registered first. Payment return_url has a separate scheme/authority/path allowlist preserving query bytes.",
+      "status": "accepted"
+    },
+    {
+      "id": "oauth-unsupported-response-type",
+      "kind": "protocol precision",
+      "reason": "Authorize uses unsupported_response_type (RFC6749) rather than the inconsistent upstream unsupported_grant_type example; echo state only if supplied.",
+      "status": "accepted"
+    },
+    {
+      "id": "upstream-deprecated-surface",
+      "kind": "documentation",
+      "reason": "confirmDeposit/cancelDeposit/updateDeposit, charge.session_id, charge response merchant_reference/metadata, updateDeposit.metadata and all Account/AccountOwner/Deposit uri fields are upstream-deprecated. Legacy callbacks remain opt-in, not recommended for new integrations.",
+      "status": "documented"
+    },
+    {
+      "id": "payout-lookup-scope",
+      "kind": "external clarification",
+      "reason": "find-transaction remains charge/refund only per the published prose. Payout IDs return404; use durable processor reconciliation and callbacks. Whether Uber needs payout lookup requires actual onboarding confirmation; no external answer is invented.",
+      "status": "pending external confirmation"
     }
   ],
   "decision_register": "decisions.json",

@@ -561,10 +561,10 @@ class CompletionSuite:
             PROCESSOR_AUTH_TOKEN=processor.token,
             PROCESSOR_STATE_KEY=base64.b64encode(os.urandom(32)).decode(),
             PROCESSOR_TIMEOUT_MS="1000",
-            PROCESSOR_LEASE_MS="1800",
+            PROCESSOR_LEASE_MS="2600",
             PROCESSOR_WAIT_MS="180",
             PROCESSOR_POLL_MS="100",
-            PROCESSOR_MAX_FAILURES="8",
+            PROCESSOR_MAX_FAILURES="0",
         )
         try:
             self.process.restart()
@@ -825,7 +825,7 @@ class CompletionSuite:
             # Keep provider responses blocked long enough to observe lock lifetime,
             # independently of a loaded CI runner's scheduling latency.
             self.process.environment.update(
-                PROCESSOR_TIMEOUT_MS="4000", PROCESSOR_LEASE_MS="6000"
+                PROCESSOR_TIMEOUT_MS="4000", PROCESSOR_LEASE_MS="9000"
             )
             self.process.restart()
             barriers = [processor.block_next(), processor.block_next()]

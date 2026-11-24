@@ -34,9 +34,10 @@
       "id": "U4",
       "title": "Cancelled lookup",
       "status": "accepted",
-      "choice": "Return200 with status CANCELLED for cancelled or expired authorizations. Add this value explicitly to the derived reference runtime schema, not the unchanged upstream pin.",
+      "choice": "Return200 REJECTED for cancelled/expired authorizations by default, with no confirmed_at. ENABLE_CANCELLED_LOOKUP=true opts into the explicit CANCELLED derived-runtime extension. Internal state remains CANCELLED.",
       "rationale": "A successful lookup should describe a known terminal business state rather than return a validation error. This is a visible additive reference-contract extension.",
-      "acceptance_test": "test_review_cancelled_lookup_and_refund_of_action_payment"
+      "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal",
+      "updated_on": "2026-11-24"
     },
     {
       "id": "U5",
@@ -90,9 +91,10 @@
       "id": "U11",
       "title": "Deposit callback routing",
       "status": "accepted",
-      "choice": "Only an explicitly configured asynchronous charge funding profile with callback_mode=deposit uses confirm/cancel/updateDeposit. Ordinary charge uses chargeCallback; refund and payout keep their own callbacks. Amount may only decrease before confirmation; queue update before confirm.",
+      "choice": "Explicit funding-profile callback routing: new integrations use chargeCallback. Only legacy, opt-in deposit profiles use the upstream-deprecated confirmDeposit/cancelDeposit/updateDeposit. A reduced amount update precedes confirmation.",
       "rationale": "No heuristic routing by transaction ID or funding-code string. Preserve clear flow boundaries and never increase a user-approved hold without new authorization.",
-      "acceptance_test": "test_owner_provider_deposit_amount_update_is_ordered_and_bounded"
+      "acceptance_test": "test_owner_provider_deposit_amount_update_is_ordered_and_bounded",
+      "updated_on": "2026-11-24"
     },
     {
       "id": "U12",
@@ -106,9 +108,10 @@
       "id": "U13",
       "title": "Refund wire contract",
       "status": "accepted",
-      "choice": "Use original_transaction_id, original_merchant_reference and CurrencyAmount. Return201 CONFIRMED/PENDING/REJECTED. Ordered late rejection reverses a confirmed refund once; unrecovered funds become explicit debt without consuming other holds.",
+      "choice": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
       "rationale": "Follow schemas; implement a durable, auditable local reversal policy rather than contradictory SUCCEEDED/FAILED examples.",
-      "acceptance_test": "test_complete_refund_pending_rejection_and_reversal"
+      "acceptance_test": "test_complete_refund_pending_rejection_and_reversal",
+      "updated_on": "2026-11-24"
     },
     {
       "id": "U14",
@@ -125,6 +128,30 @@
       "choice": "Closed UTC periods, daily by default; immutable confirmation/reversal journal; one canonical JSONL file per source account with monetary entries (an empty period has an empty manifest) and a checksummed manifest; decimal-string signed E5 and per-currency totals. Seal once, reject overlaps, replay bytes. Atomic directory or strict-host-key local SFTP publication occurs outside SQL; transport receipt is not financial acceptance.",
       "rationale": "Provide a complete runnable reconciliation workflow without claiming the chosen format is an Uber bilateral format or fabricating real hosts, keys, schedules, commercial netting or acceptance.",
       "acceptance_test": "test_owner_settlement_journal_seal_and_real_sftp_delivery"
+    }
+  ],
+  "reviewed_on_local_date": "2026-11-24",
+  "review_decisions": [
+    {
+      "id": "D1",
+      "status": "accepted",
+      "choice": "Return200 REJECTED for cancelled/expired authorizations by default, with no confirmed_at. ENABLE_CANCELLED_LOOKUP=true opts into the explicit CANCELLED derived-runtime extension. Internal state remains CANCELLED.",
+      "rationale": "Prefer an upstream enum by default without losing the more precise local state. No external enum approval is claimed.",
+      "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal"
+    },
+    {
+      "id": "D2",
+      "status": "accepted",
+      "choice": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
+      "rationale": "Upstream explicitly permits confirmed-to-rejected refund reversal; the ambiguity is the number of callback calls, not the transition.",
+      "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal"
+    },
+    {
+      "id": "D3",
+      "status": "accepted",
+      "choice": "Description type and maxLength256 remain mandatory. Pattern enforcement is opt-in STRICT_DESCRIPTION_PATTERN=true; default accepts punctuation and Unicode.",
+      "rationale": "The published example violates its own pattern; never drop escaping or required payment identity/authorization.",
+      "acceptance_test": "test_consolidated_r6_published_payload_and_each_erratum"
     }
   ]
 }

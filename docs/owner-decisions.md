@@ -15,14 +15,14 @@ necessary deviations explicit in `contracts/errata.json` and reproducible in
 | U1 | Account.name optional by default; explicit strict profile remains available. |
 | U2 | Reusable refresh tokens, no undeclared rotation field; bounded lifetime, account/scope/client binding and code-family reuse revocation. |
 | U3 | Retryable500 on infrastructure faults everywhere, never cached; authentication uses declared per-route401/400 mappings. |
-| U4 | Successful cancelled/expired authorization lookup is200 CANCELLED. This is a documented additive **reference runtime extension**, not a silent edit to upstream. |
+| U4 | Default200 REJECTED for cancelled/expired authorization, no confirmed_at. ENABLE_CANCELLED_LOOKUP=true explicitly enables the reference-only CANCELLED enum extension (D1, November24). |
 | U5 | One full or partial capture, positive and no larger than authorization. Release all unused hold on success, preserve authorized_e5, refund only captured funds; another capture conflicts409. |
 | U6 | Definitive capture rejection is422 with a schema-valid reason and releases the full original hold, even for a partial attempt. Unknown external effects remain protected/retryable, not business declines. |
 | U7 | Successful cancel is empty200. |
 | U8 | Lookup by Uber charge/refund ID; supplied merchant reference must match. |
 | U9 | Always include PSP reference on rejected charge callbacks. |
 | U10 | Code exchange returns refresh token; access token is obtained with the refresh grant. |
-| U11 | Charge callback routing is explicit per asynchronous funding profile, never inferred from an ID or funding-code prefix. Only deposit mode uses update/confirm/cancelDeposit. Amount may decrease before confirmation; update precedes confirm. Refund/payout keep their own callback types. |
+| U11 | Charge callback routing is explicit per asynchronous funding profile, never inferred from an ID or funding-code prefix. Only opt-in legacy deposit mode uses upstream-deprecated update/confirm/cancelDeposit; new integrations use chargeCallback. Amount may decrease before confirmation; update precedes confirm. Refund/payout keep their own callback types. |
 | U12 | Balance request uses account_id/funding_method and signature plus account-scoped bearer. |
 | U13 | Refund schema fields and201 CONFIRMED/PENDING/REJECTED; exactly-once local inverse with explicit debt for an unrecovered late rejection. |
 | U14 | Changed payout identity/key payload is409 DUPLICATE_REQUEST_ERROR; identical request replays. |
@@ -41,3 +41,7 @@ The U15 format is deliberately named `uberpay-reference-settlement-jsonl-v1`.
 Use an explicit mapping to a counterparty's agreed format; do not send it to Uber
 and call it a production settlement report. See `settlement.md` for runnable
 commands, guarantees, failure behavior and the transport-only receipt.
+
+## Consolidated review decisions (November 24, 2026)
+
+D1 changes U4 to upstream-compatible default lookup; D2 recommends `DEMO_REFUND_SYNC_REVERSAL` (one reversal callback) and keeps the async two-call variant explicitly awaiting external clarification; D3 relaxes only the description pattern by default, with `STRICT_DESCRIPTION_PATTERN=true` opt-in. Type/256-character maximum and escaping remain mandatory. See `contracts/decisions.json` and `docs/review-2026-11-24.md`.

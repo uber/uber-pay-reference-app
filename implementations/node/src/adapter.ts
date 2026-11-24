@@ -44,10 +44,17 @@ export class DemoPspAdapter implements PspAdapter {
   readonly mode = 'local' as const;
   constructor(readonly features = new ReferenceFeatures()) {}
   private decide(command: Json, kind = 'charge'): ProviderDecision {
-    const p = this.features.method(command.funding_method, command.country_iso2, command.amount?.currency);
-    const allowed = kind === 'payout' ? this.features.data.payout_reasons : this.features.data.charge_reasons;
-    if (p.detail && !allowed.includes(p.detail)) throw new ContractError('Reason not valid for operation');
-    if (p.behavior === 'reject') return { state: 'REJECTED', detail: p.detail ?? 'INSUFFICIENT_BALANCE' };
+    const p = this.features.method(
+      command.funding_method,
+      command.country_iso2,
+      command.amount?.currency,
+    );
+    const allowed =
+      kind === 'payout' ? this.features.data.payout_reasons : this.features.data.charge_reasons;
+    if (p.detail && !allowed.includes(p.detail))
+      throw new ContractError('Reason not valid for operation');
+    if (p.behavior === 'reject')
+      return { state: 'REJECTED', detail: p.detail ?? 'INSUFFICIENT_BALANCE' };
     if (p.behavior === 'webview' || p.behavior === 'qr')
       return {
         state: 'PENDING',
@@ -63,14 +70,20 @@ export class DemoPspAdapter implements PspAdapter {
     return { state: 'CONFIRMED' };
   }
   charge(command: Json, _providerKey: string): ProviderDecision {
-    validatePaymentData(command, command.amount ? checkedAmount(command.amount.value) : undefined);
+    validatePaymentData(
+      command,
+      command.amount ? checkedAmount(command.amount.value) : undefined,
+      this.features.method(command.funding_method),
+    );
     return this.decide(command);
   }
   payout(command: Json, _providerKey: string): ProviderDecision {
     return this.decide(command, 'payout');
   }
   capture(command: Json, _providerKey: string): CaptureDecision {
-    return ['capture_hard', 'capture_soft'].includes(this.features.method(command.funding_method).behavior)
+    return ['capture_hard', 'capture_soft'].includes(
+      this.features.method(command.funding_method).behavior,
+    )
       ? {
           state: 'REJECTED',
           detail:
@@ -93,7 +106,7 @@ export class DemoPspAdapter implements PspAdapter {
       : { state: 'CONFIRMED' };
   }
   getBalance(account: Json): Json {
-    validatePaymentData(account);
+    validatePaymentData(account, undefined, { itemized: account.itemized });
     const result: Json = {
       available_balance: { value: account.available_e5, currency: account.currency },
       balance: { value: account.balance_e5, currency: account.currency },

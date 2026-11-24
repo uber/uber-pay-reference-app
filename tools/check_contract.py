@@ -23,6 +23,12 @@ def normalized(source):
                 param["required"] = True
                 param["schema"].pop("required", None)
     result["components"]["schemas"]["Account"]["required"].remove("name")
+    description = result["components"]["schemas"]["TransactionDescription"]
+    description["x-upstream-pattern"] = description.pop("pattern")
+    for name in ("Account", "AccountOwner", "Deposit"):
+        uri = result["components"]["schemas"][name].get("properties", {}).get("uri", {})
+        if uri.get("deprecated"):
+            uri.pop("format", None)
     lookup = result["paths"]["/find-transaction"]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"]["properties"]["status"]

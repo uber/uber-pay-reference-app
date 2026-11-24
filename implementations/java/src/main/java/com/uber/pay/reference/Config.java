@@ -22,6 +22,9 @@ final class Config {
       controlSecret;
   final int port, skew, delay, interval, maxAttempts, retryMs, actionTtlMs, refreshTtlSeconds;
   final boolean controls, oauthRequired, strictAccountName, processorPauseAfterPrepare;
+  final int callbackBudget, processorBudget;
+  final boolean strictDescription, cancelledLookup;
+  final Set<String> returnUrls;
   final Set<String> redirects;
   final Path contract, migration;
   final SignatureVerifier signatures;
@@ -46,7 +49,22 @@ final class Config {
     processorLease = num(env, "PROCESSOR_LEASE_MS", 15000, 1, 60000);
     processorWait = num(env, "PROCESSOR_WAIT_MS", 250, 1, 60000);
     processorPoll = num(env, "PROCESSOR_POLL_MS", 200, 1, 60000);
-    processorMaxFailures = num(env, "PROCESSOR_MAX_FAILURES", 8, 1, 1000);
+    if (processorLease < 2 * processorTimeout + 500)
+      throw new IllegalArgumentException(
+          "Processor lease must cover lookup and dispatch deadlines");
+    processorMaxFailures = num(env, "PROCESSOR_MAX_FAILURES", 0, 0, 1000);
+    callbackBudget = num(env, "CALLBACK_RETRY_BUDGET_MS", 86400000, 1, 604800000);
+    processorBudget = num(env, "PROCESSOR_RETRY_BUDGET_MS", 86400000, 1, 604800000);
+    strictDescription = get(env, "STRICT_DESCRIPTION_PATTERN", "false").equals("true");
+    cancelledLookup = get(env, "ENABLE_CANCELLED_LOOKUP", "false").equals("true");
+    returnUrls =
+        Set.copyOf(
+            Arrays.asList(
+                get(
+                        env,
+                        "RETURN_URL_ALLOWLIST",
+                        "uber://payments/,uber://ubercash_topup,http://127.0.0.1:9090/return")
+                    .split(",")));
     host = get(env, "HOST", "127.0.0.1");
     port = num(env, "PORT", 8080, 1, 65535);
     base = get(env, "BASE_PATH", "/uberpay/v1");
@@ -64,6 +82,8 @@ final class Config {
     localUrl(publicBase);
     uberClient = get(env, "UBER_CLIENT_ID", "demo-uber-client");
     uberSecret = get(env, "UBER_CLIENT_SECRET", "demo-uber-secret");
+    if (client.isBlank() || secret.isBlank() || uberClient.isBlank() || uberSecret.isBlank())
+      throw new IllegalArgumentException("Client identities and secrets must not be empty");
     redirects =
         Set.copyOf(
             Arrays.asList(
@@ -75,8 +95,8 @@ final class Config {
     skew = num(env, "SIGNATURE_MAX_SKEW_SECONDS", 300, 1, 3600);
     delay = num(env, "ASYNC_DELAY_MS", 500, 0, 3600000);
     interval = num(env, "WORKER_INTERVAL_MS", 100, 10, 60000);
-    maxAttempts = num(env, "CALLBACK_MAX_ATTEMPTS", 5, 1, 100);
-    retryMs = num(env, "CALLBACK_RETRY_MS", 200, 1, 60000);
+    maxAttempts = num(env, "CALLBACK_MAX_ATTEMPTS", 0, 0, 100);
+    retryMs = num(env, "CALLBACK_RETRY_MS", 1000, 1, 60000);
     actionTtlMs = num(env, "ACTION_TTL_MS", 600000, 1, 3600000);
     refreshTtlSeconds = num(env, "REFRESH_TOKEN_TTL_SECONDS", 2592000, 1, 31536000);
     strictAccountName = get(env, "STRICT_ACCOUNT_NAME", "false").equals("true");
@@ -98,7 +118,21 @@ final class Config {
                   Path.of(get(env, "UBER_PUBLIC_KEY_FILE", ".local/uber-public.pem"))));
       if (((RSAPublicKey) key).getModulus().bitLength() < 2048)
         throw new IllegalArgumentException("RSA key must be at least 2048 bits");
-      signatures = new SignatureVerifier(Map.of(keyId, key), skew);
+      Map<String, java.security.PublicKey> keys = new HashMap<>();
+      keys.put(keyId, key);
+      String manifest = get(env, "UBER_SIGNING_KEYS_FILE", "");
+      if (!manifest.isEmpty()) {
+        var files = Json.parse(Files.readAllBytes(Path.of(manifest)));
+        for (var it = files.fields(); it.hasNext(); ) {
+          var item = it.next();
+          var extra =
+              SignatureVerifier.publicKey(Files.readString(Path.of(item.getValue().asText())));
+          if (item.getKey().isEmpty() || ((RSAPublicKey) extra).getModulus().bitLength() < 2048)
+            throw new IllegalArgumentException("Invalid signing key");
+          keys.put(item.getKey(), extra);
+        }
+      }
+      signatures = new SignatureVerifier(keys, skew);
     } catch (java.io.IOException e) {
       throw new IllegalArgumentException("Cannot read Uber public key file", e);
     }

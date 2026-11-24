@@ -23,6 +23,8 @@ class MockUber:
         self.events, self.tokens = [], {}
         self.faults = defaultdict(deque)
         self.token_requests = 0
+        self.unavailable_until = {}
+        self.retry_after = {}
         self.barriers = defaultdict(deque)
         self.server = ThreadingHTTPServer((host, port), self.handler())
         self.server.daemon_threads = True
@@ -70,11 +72,13 @@ class MockUber:
             def log_message(self, *_):
                 pass
 
-            def reply(self, status, value=None):
+            def reply(self, status, value=None, retry_after=None):
                 body = json.dumps(value).encode() if value is not None else b""
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
+                if retry_after is not None:
+                    self.send_header("Retry-After", str(retry_after))
                 self.end_headers()
                 try:
                     self.wfile.write(body)
@@ -160,8 +164,13 @@ class MockUber:
                 with mock.lock:
                     if status == 200 and mock.faults[(name, transaction_id)]:
                         status = mock.faults[(name, transaction_id)].popleft()
+                    if status == 200 and time.monotonic() < mock.unavailable_until.get(
+                        (name, transaction_id), 0
+                    ):
+                        status = 503
                     mock.events.append(
                         {
+                            "time": time.monotonic(),
                             "name": name,
                             "id": transaction_id,
                             "payload": payload,
@@ -180,7 +189,12 @@ class MockUber:
                 if barrier:
                     barrier.entered.set()
                     barrier.release.wait(timeout=12)
-                self.reply(status)
+                self.reply(
+                    status,
+                    retry_after=mock.retry_after.get((name, transaction_id))
+                    if status in (429, 503)
+                    else None,
+                )
 
         return Handler
 

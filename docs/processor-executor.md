@@ -27,8 +27,8 @@ invent a replacement key and resubmit payments.
 
 ## Three phases
 
-1. **Prepare:** authenticate before replay. In a short transaction, serialize only
-   the logical operation identity; validate the native operation under a rolled-back
+1. **Prepare:** authenticate before replay. In a short transaction, serialize both the idempotency key and
+   logical resource identity; validate the native operation under a rolled-back
    savepoint; commit an AES-256-GCM encrypted command, stable provider key, resource
    claim, debit reservation and any required credit headroom. A known local rejection
    is committed/replayed without contacting the processor.
@@ -51,7 +51,7 @@ The durable worker looks up the original key before a safe, same-key submission
 only after a definite 404. HTTP 202 means unresolved, **not** permission to retry
 with a new key. Lease generations fence stale finalizers. A repeated in-flight
 request waits `PROCESSOR_WAIT_MS` then returns retryable 500 if still unresolved.
-After `PROCESSOR_MAX_FAILURES`, the intent becomes inspectable `RECONCILE`; its
+After the `PROCESSOR_RETRY_BUDGET_MS` elapsed failure budget (default24h), the intent becomes inspectable `RECONCILE`; its
 reservations remain. An explicit same-key retry can resume lookup. Never delete an
 uncertain intent or clear its reservation to make another debit proceed.
 
@@ -73,7 +73,7 @@ callback blocks later ones for inspection/reconciliation.
 Funding configuration is immutable for the lifetime of outstanding intents. The
 command includes its configuration hash; restoring with changed aliases fails
 closed. Drain outstanding work or restore the original configuration before a
-change. There is no automatic key rotation or hot configuration migration.
+change. Inbound signing keys support configured overlap. Processor encryption-key/hot-configuration migration is not implemented.
 
 ## Accounting and policy choices
 
@@ -83,7 +83,7 @@ change. There is no automatic key rotation or hot configuration migration.
   unrecovered amount in `account_debts`. Future credits or released holds repay debt
   before becoming spendable. This is an explicit **synthetic reference policy**, not
   an Uber-approved production collections policy.
-- `DEMO_DEPOSIT` is a distinct synthetic flow: confirmation/cancellation callbacks,
+- `DEMO_DEPOSIT` is an opt-in **legacy upstream-deprecated callback** flow: confirmation/cancellation callbacks,
   with an optional **reduced** amount update delivered before confirmation. Modern
   ordinary charges still use chargeCallback. Assigned funding profiles explicitly select callback_mode under accepted U11.
 - Balance uses the reference wallet ledger, not a remote production balance source.
@@ -124,3 +124,5 @@ deposit callbacks, a final CONFIRMED processor decision/event may include
 decrease. Finalization releases unused hold, records actual amount, and enqueues
 updateDeposit before confirmDeposit. Increases or ordinary-charge adjustments
 are quarantined without changing the ledger or inventing a successful callback.
+
+Unchanged provider versions advance next_attempt_at (fair polling). Transport failure streaks back off exponentially to60s; successful polls reset the elapsed failure streak. The optional positive PROCESSOR_MAX_FAILURES cap defaults0 (disabled), intended only for explicit bounded fault tests. Leases must cover two processor deadlines plus500ms. Cipher AAD binds client/intent/operation/resource. Sorted participating-account locking covers preparation and finalization. See operations.md for durable inspection and re-drive.

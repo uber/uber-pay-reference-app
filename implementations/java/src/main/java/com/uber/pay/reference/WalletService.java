@@ -72,6 +72,18 @@ final class WalletService {
         seconds);
   }
 
+  String instrumentFingerprint(String account) throws Exception {
+    var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+    mac.init(
+        new javax.crypto.spec.SecretKeySpec(
+            config.secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+    return java.util.HexFormat.of()
+        .formatHex(
+            mac.doFinal(
+                ("uberpay-instrument-v1|" + account)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+  }
+
   Reply authorize(Map<String, String> q) {
     if (!config.client.equals(q.get("client_id"))
         || !config.redirects.contains(q.get("redirect_uri")))
@@ -83,14 +95,19 @@ final class WalletService {
       target +=
           (target.contains("?") ? "&" : "?")
               + "error="
-              + (e.code.equals("invalid_scope") ? "invalid_scope" : "invalid_request")
-              + "&state="
-              + PaymentService.enc(q.getOrDefault("state", ""));
+              + (Set.of("invalid_scope", "unsupported_response_type").contains(e.code)
+                  ? e.code
+                  : "invalid_request")
+              + (q.containsKey("state") ? "&state=" + PaymentService.enc(q.get("state")) : "");
       return new Reply(302, "", Map.of("Location", target, "Cache-Control", "no-store"));
     }
   }
 
   private Reply authorizeValidated(Map<String, String> q) {
+    if (q.containsKey("response_type")
+        && !q.get("response_type").isEmpty()
+        && !q.get("response_type").equals("code"))
+      throw new ApiError(400, "unsupported_response_type", "Unsupported response type");
     for (String k :
         List.of(
             "client_id",
@@ -122,7 +139,7 @@ final class WalletService {
     String language = ReferenceFeatures.locale(details.get(0).path("locale").asText());
     WalletProvider.Identity identity = provider.identityForConsent();
     String consent = random(), csrf = random();
-    db.atomic(
+    db.raw(
         c -> {
           put(
               c,
@@ -336,9 +353,11 @@ final class WalletService {
                     "account_id",
                     acc,
                     "fingerprint",
-                    identity.fingerprint(),
+                    instrumentFingerprint(acc),
                     "display_name",
-                    identity.displayName());
+                    b.path("wallet_reference_data")
+                        .path("display_name")
+                        .asText(identity.displayName()));
             Reply out =
                 Reply.json(
                     200,

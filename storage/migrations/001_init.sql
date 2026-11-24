@@ -247,3 +247,25 @@ DROP TRIGGER IF EXISTS immutable_settlement_batches ON settlement_batches;
 CREATE TRIGGER immutable_settlement_batches BEFORE UPDATE OR DELETE ON settlement_batches FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();
 DROP TRIGGER IF EXISTS immutable_settlement_files ON settlement_batch_files;
 CREATE TRIGGER immutable_settlement_files BEFORE UPDATE OR DELETE ON settlement_batch_files FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();
+
+-- Review 2026-11-24: finite elapsed retry budgets and non-scanning hot paths.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_started_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE provider_intents ADD COLUMN IF NOT EXISTS recovery_started_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS transactions_expiring ON transactions(client_id,expires_at) WHERE state='AUTHORIZED';
+CREATE INDEX IF NOT EXISTS transactions_refund_total ON transactions(client_id,original_id) WHERE kind='refund';
+CREATE INDEX IF NOT EXISTS jobs_action_capability ON jobs(client_id,((payload::jsonb)->>'payment_token_hash')) WHERE status='WAITING';
+CREATE OR REPLACE FUNCTION reference_lock_accounts(p_client TEXT,p_body JSONB)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+ PERFORM 1 FROM accounts WHERE client_id=p_client
+ AND account_id IN (p_body#>>'{payer,id}',p_body#>>'{payee,account,account_id}')
+ ORDER BY account_id,currency FOR UPDATE;
+END $$;
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count_at_start INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS operator_actions (
+ id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ client_id TEXT NOT NULL, work_kind TEXT NOT NULL, work_id TEXT NOT NULL,
+ reason TEXT NOT NULL, actor TEXT NOT NULL DEFAULT current_user,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

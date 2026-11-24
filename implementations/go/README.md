@@ -45,7 +45,7 @@ The sample ledger's debit/reserve/refund effects and idempotent response are com
 
 `PspAdapter` exposes charge, capture, cancel, refund, payout, balance, and operation lookup. `WalletProvider` isolates the fake consent identity and reference exchange. Internal pending/authorized states are mapped to the pinned wire contract; partial capture and CANCELLED lookup follow the accepted reference choices in contracts/decisions.json.
 
-The callback worker performs network I/O outside database transactions. Callback 409 is recorded as `RECONCILE`, permanent errors/retry exhaustion as `FAILED`, and only 2xx as `DONE`. A stable callback identity is reused where the callback supports an idempotency header. Refresh tokens are reusable without rotation in the provisional local profile; authorization-code reuse revokes the issued token family.
+The callback worker performs network I/O outside database transactions. Callback 409 is recorded as `RECONCILE`, permanent errors/retry exhaustion as `FAILED`, and only 2xx as `DONE`. A stable callback identity is reused where the callback supports an idempotency header. Refresh tokens are reusable without rotation in the accepted reference-policy local profile; authorization-code reuse revokes the issued token family.
 
 ## Review-hardened local policies
 

@@ -112,3 +112,24 @@ A real deployment additionally needs purpose/retention/erasure, storage/file
 cryptography, access control, clock/cutoff/reconciliation operations, credentials,
 its actual counterparty format and commercial financial acceptance workflow.
 These are not granted by an engineering decision to ship this reference format.
+
+
+## Review clarifications (November 24)
+
+The shared-producer/exclusive-closer lock is now only a **short barrier**, not held
+while rendering/sealing files. An exporter-only transaction lock serializes seals.
+Because period_end is already in the past, new producers timestamp after the
+barrier; the immutable pre-boundary journal can be read without blocking today's
+commits. Settlement `occurred_at` is the deferred journal/commit-boundary clock,
+not API `confirmed_at` (which uses transaction time); a transaction crossing
+midnight belongs to the journal's UTC day. Consumers must use the exported event
+clock for reconciliation windows rather than infer the date from the API field.
+
+Use either --date YYYY-MM-DD or explicit --start/--end UTC timestamps for smaller
+non-overlapping periods. SETTLEMENT_MAX_ENTRIES configures the reference cap;
+SETTLEMENT_SOURCE_IDS is a comma-separated list of registered reporting sources,
+including ones with no activity that must receive empty files. Activity sources
+are included automatically. Directory publication fsyncs files and staging/parent
+directories. Verification recomputes manifest line counts and per-currency totals,
+not just checksums. Known safe validation errors are printed to explain a cap or
+window failure; raw database/credential exception text is never printed.

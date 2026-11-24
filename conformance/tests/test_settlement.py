@@ -16,11 +16,47 @@ from tools.settlement import (
     group_by_source,
     render,
     sha,
+    canonical,
+    verify_batch,
 )
 from tools.settlement_sftp import SftpSink
 
 
 class SettlementTest(unittest.TestCase):
+    def test_inactive_registered_source_receives_empty_report(self):
+        batch, window, rows = self.batch()
+        with patch.dict(
+            "os.environ", {"SETTLEMENT_SOURCE_IDS": "source-a,inactive-source"}
+        ):
+            report = render("client", window, rows)
+        inactive = next(
+            f for f in report["files"] if f["source_account_id"] == "inactive-source"
+        )
+        self.assertEqual(inactive["entries"], 0)
+        self.assertEqual(inactive["content"], "")
+        self.assertEqual(inactive["net_e5_by_currency"], {})
+        verify_batch(report)
+
+    def test_verification_recomputes_counts_and_totals_not_only_hashes(self):
+        for field, value in (("entries", 999), ("net_e5_by_currency", {"BRL": "0"})):
+            with self.subTest(field=field):
+                batch, _, _ = self.batch()
+                manifest = json.loads(batch["manifest"])
+                manifest["files"][0][field] = value
+                batch["manifest"] = canonical(manifest)
+                batch["manifest_sha256"] = sha(batch["manifest"])
+                with self.assertRaisesRegex(ValueError, "totals or line counts"):
+                    verify_batch(batch)
+
+    def test_cap_can_be_resolved_by_explicit_subperiod(self):
+        _, window, rows = self.batch()
+        with patch("tools.settlement.MAX_ENTRIES", 1):
+            with self.assertRaisesRegex(ValueError, "split"):
+                render("client", window, rows)
+            split = SettlementWindow(window.start, rows[1]["occurred_at"])
+            report = render("client", split, rows[:1])
+            self.assertEqual(report["files"][0]["entries"], 1)
+
     def batch(self):
         now = datetime(2026, 1, 2, tzinfo=timezone.utc)
         window = SettlementWindow(now - timedelta(days=1), now)
