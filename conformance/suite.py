@@ -14,6 +14,7 @@ from .review_suite import ReviewRegressionSuite
 from .completion_suite import CompletionSuite
 from .owner_suite import OwnerSuite
 from .consolidated_suite import ConsolidatedSuite
+from .final_owner_suite import FinalOwnerSuite
 from . import contract
 from .wire import eventually
 
@@ -33,6 +34,7 @@ class HiddenForm(HTMLParser):
 
 
 class GatewaySuite(
+    FinalOwnerSuite,
     ConsolidatedSuite,
     OwnerSuite,
     CompletionSuite,

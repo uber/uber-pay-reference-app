@@ -142,7 +142,7 @@ final class Gateway {
     if (t.isEmpty()) throw new ApiError(404, "not_found", "Unknown route");
     String expected = Set.of("/authorize", "/find-transaction").contains(t) ? "GET" : "POST";
     if (!method.equals(expected)) throw new ApiError(404, "not_found", "Unknown route");
-    if (t.equals("/authorize")) return wallets.authorize(query);
+    if (t.equals("/authorize")) return wallets.authorize(query, req.getRemoteAddr());
     if (method.equals("GET") && bytes.length != 0)
       throw new ApiError(400, "invalid_request", "GET body must be empty");
     Map<String, String> headers = new HashMap<>();

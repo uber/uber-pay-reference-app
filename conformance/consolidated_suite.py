@@ -38,7 +38,7 @@ class ConsolidatedSuite:
             for _ in range(2)
         ]
         expected = hmac.new(
-            self.client_secret.encode(),
+            self.process.environment["INSTRUMENT_FINGERPRINT_KEY"].encode(),
             b"uberpay-instrument-v1|demo-account",
             hashlib.sha256,
         ).hexdigest()

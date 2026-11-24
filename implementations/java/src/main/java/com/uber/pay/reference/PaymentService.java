@@ -100,7 +100,8 @@ final class PaymentService {
       var old =
           Database.one(
               c,
-              "SELECT * FROM operations WHERE client_id=? AND operation_name=? AND" + " idem_key=?",
+              "SELECT * FROM reference_operations WHERE client_id=? AND operation_name=? AND"
+                  + " idem_key=?",
               config.client,
               operation,
               idem);
@@ -121,6 +122,16 @@ final class PaymentService {
           "SELECT reference_assert_unclaimed(?,?)",
           config.client,
           resourceKey(operation, resource, body));
+    if (Set.of("capture", "cancel").contains(operation)) {
+      String expiredId = pathId(resource);
+      var expiry =
+          Database.one(
+              c,
+              "SELECT * FROM transactions WHERE client_id=? AND kind='charge' AND id=? FOR UPDATE",
+              config.client,
+              expiredId);
+      if (expiry != null) expire(c, expiry);
+    }
     Savepoint sp = c.setSavepoint();
     Reply r;
     try {
@@ -168,7 +179,7 @@ final class PaymentService {
         && r.headers().getOrDefault("Content-Type", "").contains("application/json")
         && !r.headers().containsKey("Content-Language")) {
       var body = (ObjectNode) Json.parse(r.body());
-      body.put("error_description", features.text(selected, "invalid_request"));
+      body.put("error_description", features.text(selected, "http_" + r.status()));
       return new Reply(r.status(), Json.string(body), headers);
     }
     return new Reply(r.status(), r.body(), headers);
@@ -336,7 +347,13 @@ final class PaymentService {
         throw new ApiError(400, "INVALID_PAYMENT_DETAILS_ERROR", "Invalid synthetic wallet");
       if (declines.containsKey(payee))
         return Reply.json(422, Json.obj("detail", declines.get(payee)));
-      account(c, payee, cur);
+      try {
+        account(c, payee, cur);
+      } catch (ApiError e) {
+        if (e.status == 400 || e.status == 404)
+          throw new ApiError(400, "INVALID_PAYMENT_DETAILS_ERROR", "Unknown payee");
+        throw e;
+      }
       acc = b.path("payer").path("id").asText();
     }
     var a = account(c, acc, cur);
@@ -618,6 +635,13 @@ final class PaymentService {
             .subtract(new java.math.BigDecimal(sum.get("total").toString()))
             .longValueExact();
     String funding = Database.str(original, "funding_method");
+    if (Json.parse(Database.str(original, "reference_profile"))
+            .path("behavior")
+            .asText()
+            .equals("refund_reversal")
+        && !config.asyncRefundReversal)
+      throw new ApiError(
+          400, "VALIDATION_ERROR", "Async two-callback reversal is an opt-in test extension");
     PspAdapter.Decision decision =
         adapter.refund(
             new PspAdapter.RefundCommand(funding, n, remaining, b), providerKey("refund", id));

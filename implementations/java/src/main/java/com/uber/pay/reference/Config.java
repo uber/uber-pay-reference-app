@@ -6,6 +6,9 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.*;
 
 final class Config {
+  final String fingerprintKey;
+  final int consentGlobal, consentIP;
+  final boolean asyncRefundReversal;
   final String processorMode, processorUrl, processorToken, processorKey;
   final int processorTimeout, processorLease, processorWait, processorPoll, processorMaxFailures;
   final String host,
@@ -34,6 +37,13 @@ final class Config {
       throw new IllegalArgumentException(
           "Only isolated local mode is supported; supply reviewed real adapters before sandbox"
               + " use");
+    fingerprintKey =
+        get(env, "INSTRUMENT_FINGERPRINT_KEY", "local-synthetic-instrument-key-v1-only");
+    if (fingerprintKey.length() < 32)
+      throw new IllegalArgumentException("Instrument key must be at least32 characters");
+    consentGlobal = num(env, "PUBLIC_CONSENT_GLOBAL_PER_MINUTE", 200, 1, 1000000);
+    consentIP = num(env, "PUBLIC_CONSENT_IP_PER_MINUTE", 60, 1, 1000000);
+    asyncRefundReversal = get(env, "ENABLE_ASYNC_REFUND_REVERSAL", "false").equals("true");
     processorMode = get(env, "PROCESSOR_MODE", "local");
     if (!Set.of("local", "http").contains(processorMode))
       throw new IllegalArgumentException("Invalid PROCESSOR_MODE");

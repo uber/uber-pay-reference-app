@@ -72,32 +72,43 @@ final class WalletService {
         seconds);
   }
 
-  String instrumentFingerprint(String account) throws Exception {
-    var mac = javax.crypto.Mac.getInstance("HmacSHA256");
-    mac.init(
-        new javax.crypto.spec.SecretKeySpec(
-            config.secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
-    return java.util.HexFormat.of()
-        .formatHex(
-            mac.doFinal(
-                ("uberpay-instrument-v1|" + account)
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+  Reply authorize(Map<String, String> q) {
+    return authorize(q, "local");
   }
 
-  Reply authorize(Map<String, String> q) {
+  Reply authorize(Map<String, String> q, String address) {
     if (!config.client.equals(q.get("client_id"))
         || !config.redirects.contains(q.get("redirect_uri")))
       throw new ApiError(400, "invalid_request", "Unregistered authorization request");
     try {
+      boolean admitted =
+          db.raw(
+              c -> {
+                var r =
+                    Database.one(
+                        c,
+                        "SELECT reference_admit_consent(?,?,?,?) AS admitted",
+                        config.client,
+                        Json.hash(address),
+                        config.consentGlobal,
+                        config.consentIP);
+                return Boolean.TRUE.equals(r.get("admitted"));
+              });
+      if (!admitted)
+        return new Reply(429, "", Map.of("Retry-After", "60", "Cache-Control", "no-store"));
       return authorizeValidated(q);
-    } catch (ApiError e) {
+    } catch (Exception e) {
+      String error =
+          e instanceof ApiError a
+              ? (Set.of("invalid_scope", "unsupported_response_type").contains(a.code)
+                  ? a.code
+                  : "invalid_request")
+              : "server_error";
       String target = q.get("redirect_uri");
       target +=
           (target.contains("?") ? "&" : "?")
               + "error="
-              + (Set.of("invalid_scope", "unsupported_response_type").contains(e.code)
-                  ? e.code
-                  : "invalid_request")
+              + error
               + (q.containsKey("state") ? "&state=" + PaymentService.enc(q.get("state")) : "");
       return new Reply(302, "", Map.of("Location", target, "Cache-Control", "no-store"));
     }
@@ -353,7 +364,7 @@ final class WalletService {
                     "account_id",
                     acc,
                     "fingerprint",
-                    instrumentFingerprint(acc),
+                    identity.fingerprint(),
                     "display_name",
                     b.path("wallet_reference_data")
                         .path("display_name")

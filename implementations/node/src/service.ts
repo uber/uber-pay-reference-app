@@ -103,7 +103,7 @@ export class Service {
     if (needsKey) {
       const found = (
         await db.query(
-          'SELECT * FROM operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3',
+          'SELECT * FROM reference_operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3',
           [this.config.clientId, name, idem],
         )
       ).rows[0];
@@ -121,6 +121,15 @@ export class Service {
         this.config.clientId,
         this.resourceKey(name, target, body),
       ]);
+    if (['capture', 'cancel'].includes(name)) {
+      const row = (
+        await db.query(
+          "SELECT * FROM transactions WHERE client_id=$1 AND kind='charge' AND id=$2 FOR UPDATE",
+          [this.config.clientId, this.idFromTarget(target)],
+        )
+      ).rows[0];
+      if (row) await this.expire(db, row, false);
+    }
     await db.query('SAVEPOINT operation_effect');
     let result: Result;
     try {
@@ -179,7 +188,7 @@ export class Service {
       } else throw error;
     }
     if (result.status >= 400 && result.body)
-      result.body.error_description = this.features.text(language, 'invalid_request');
+      result.body.error_description = this.features.text(language, 'http_' + result.status);
     result.headers = { ...result.headers, 'Content-Language': this.features.locale(language) };
     try {
       this.contract.response(operation, result.status, result.body, body?.grant_type);
@@ -309,7 +318,13 @@ export class Service {
         'payment-error-account': 'PAYMENT_ERROR',
       };
       if (Object.hasOwn(declines, payee)) throw new Failure(422, declines[payee]);
-      await this.account(db, payee, body.amount.currency);
+      try {
+        await this.account(db, payee, body.amount.currency);
+      } catch (e) {
+        if (e instanceof Failure && [400, 404].includes(e.status))
+          throw new Failure(400, 'INVALID_PAYMENT_DETAILS_ERROR');
+        throw e;
+      }
     }
     const accountId =
       kind === 'charge' ? (body.authorization?.account_id ?? 'demo-account') : body.payer.id;
@@ -513,6 +528,11 @@ export class Service {
       )
     ).rows[0];
     if (BigInt(refunds.used) + amount > original.amount_e5) throw new Failure(400);
+    if (
+      decode(original.reference_profile).behavior === 'refund_reversal' &&
+      !this.config.asyncRefundReversal
+    )
+      throw new Failure(400);
     const decision = await this.adapter.refund(
       { ...body, funding_method: original.funding_method },
       hash(`refund:${body.id}`),
@@ -980,7 +1000,7 @@ export class Service {
           {
             type: 'authorized_account',
             account_id: account,
-            fingerprint: createHmac('sha256', this.config.clientSecret)
+            fingerprint: createHmac('sha256', this.config.fingerprintKey)
               .update('uberpay-instrument-v1|' + account)
               .digest('hex'),
             display_name: body.wallet_reference_data?.display_name || 'Local demo wallet',

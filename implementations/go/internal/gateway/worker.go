@@ -110,11 +110,18 @@ func (p *UberTokenProvider) Invalidate(scope string) {
 func (a *App) RunWorkers(ctx context.Context) {
 	ticker := time.NewTicker(a.Config.Interval)
 	defer ticker.Stop()
+	var nextMaintenance time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if time.Now().After(nextMaintenance) {
+				nextMaintenance = time.Now().Add(time.Minute)
+				if _, e := a.Store.Pool.Exec(ctx, "SELECT reference_maintain($1,$2)", a.Config.ClientID, 200); e != nil && ctx.Err() == nil {
+					log.Print("maintenance retained for retry")
+				}
+			}
 			if e := a.expireAuthorizations(ctx); e != nil && ctx.Err() == nil {
 				log.Print("expiry worker database failure")
 			}
@@ -437,7 +444,7 @@ func (a *App) reverseRefund(ctx context.Context, tx pgx.Tx, id string) error {
 	}
 	return queue(ctx, tx, a.Config.ClientID, "refund", id, "CALLBACK", "updateRefund", Object{"status": "REJECTED", "merchant_reference": t.Ref, "failed_reason": "Synthetic processor reversed the refund; any unrecovered funds are recorded as debt"}, "PENDING", 0)
 }
-func (a *App) processReversal(ctx context.Context) error {
+func (a *App) processReversal(ctx context.Context) (err error) {
 	tx, e := a.Store.Begin(ctx)
 	if e != nil {
 		return e
@@ -451,6 +458,22 @@ func (a *App) processReversal(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
+	if _, e = tx.Exec(ctx, "SAVEPOINT reversal_item"); e != nil {
+		return e
+	}
+	defer func() {
+		if err != nil {
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT reversal_item")
+			_, recordErr := tx.Exec(ctx, "UPDATE jobs SET attempts=attempts+1,last_error='worker_item_unresolved',next_attempt_at=now()+(LEAST(60000,1000*power(2,LEAST(attempts,6)))*interval '1 millisecond') WHERE id=$1", job)
+			if recordErr == nil {
+				recordErr = tx.Commit(ctx)
+			}
+			log.Printf("worker_item_failed job_id=%s", job)
+			if recordErr == nil {
+				err = nil
+			}
+		}
+	}()
 	if e = a.reverseRefund(ctx, tx, id); e != nil {
 		return e
 	}

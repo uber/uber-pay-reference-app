@@ -22,6 +22,7 @@ build:
 	implementations/java/mvnw -q package
 contract:
 	$(VENV) tools/check_contract.py
+	$(VENV) tools/check_supply_chain.py
 migration-check:
 	$(VENV) tools/check_migrations.py --database-url '$(DATABASE_URL)'
 lint:

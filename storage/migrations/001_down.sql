@@ -1,3 +1,10 @@
+DROP TRIGGER IF EXISTS skip_archived_job ON jobs;
+DROP FUNCTION IF EXISTS reference_skip_archived_job();
+DROP FUNCTION IF EXISTS reference_maintain(TEXT,INTEGER);
+DROP FUNCTION IF EXISTS reference_admit_consent(TEXT,TEXT,INTEGER,INTEGER);
+DROP FUNCTION IF EXISTS reference_bind_runtime(TEXT,TEXT,TEXT);
+DROP VIEW IF EXISTS reference_operations;
+DROP TABLE IF EXISTS operations_archive,jobs_archive,runtime_bindings,public_buckets;
 -- DESTRUCTIVE: disposable local test DB ONLY; never run against a PSP ledger.
 DROP TRIGGER IF EXISTS transaction_settlement_entry ON transactions;
 DROP TRIGGER IF EXISTS immutable_settlement_entries ON settlement_entries;

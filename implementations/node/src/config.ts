@@ -103,7 +103,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   )
     throw new Error('Client identities and secrets must not be empty');
   if (int('SIGNATURE_MAX_SKEW_SECONDS', '300') > 3600) throw new Error('Excessive signature skew');
+  if (get('INSTRUMENT_FINGERPRINT_KEY', 'local-synthetic-instrument-key-v1-only').length < 32)
+    throw new Error('Instrument fingerprint key must be at least 32 characters');
   return {
+    fingerprintKey: get('INSTRUMENT_FINGERPRINT_KEY', 'local-synthetic-instrument-key-v1-only'),
+    consentGlobal: int('PUBLIC_CONSENT_GLOBAL_PER_MINUTE', '200'),
+    consentIP: int('PUBLIC_CONSENT_IP_PER_MINUTE', '60'),
+    asyncRefundReversal: get('ENABLE_ASYNC_REFUND_REVERSAL', 'false') === 'true',
     root,
     basePath,
     callbackBase,

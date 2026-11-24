@@ -41,6 +41,9 @@ func OpenStore(ctx context.Context, c Config) (*Store, error) {
 	if _, e = pool.Exec(ctx, string(sql)); e != nil {
 		return fail(e)
 	}
+	if _, e = pool.Exec(ctx, "SELECT reference_bind_runtime($1,$2,$3)", c.ClientID, "go", fingerprint(c.FingerprintKey)); e != nil {
+		return fail(e)
+	}
 	for id, amount := range map[string]int64{"demo-settlement": 1000000000000000000, "demo-account": 1000000000000000000, "insufficient-account": 100000} {
 		_, e = pool.Exec(ctx, "INSERT INTO accounts(client_id,account_id,currency,available_e5,balance_e5) VALUES($1,$2,'BRL',$3,$3) ON CONFLICT DO NOTHING", c.ClientID, id, amount)
 		if e != nil {

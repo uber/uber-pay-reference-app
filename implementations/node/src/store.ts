@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
 import type { Config } from './config.js';
@@ -17,13 +18,22 @@ export class Store {
       lock_timeout: 1500,
     });
     this.pool.on('connect', (client) =>
-      client.on('error', () => console.error('database active connection failed; transaction will retry')),
+      client.on('error', () =>
+        console.error('database active connection failed; transaction will retry'),
+      ),
     );
-    this.pool.on('error', () => console.error('database idle connection failed; pool will reconnect'));
+    this.pool.on('error', () =>
+      console.error('database idle connection failed; pool will reconnect'),
+    );
   }
   async init(): Promise<void> {
     await this.pool.query(readFileSync(this.config.migrationFile, 'utf8'));
     await this.transaction(async (db) => {
+      await db.query('SELECT reference_bind_runtime($1,$2,$3)', [
+        this.config.clientId,
+        'node',
+        createHash('sha256').update(this.config.fingerprintKey).digest('hex'),
+      ]);
       await db.query(
         `INSERT INTO accounts(client_id,account_id,currency,available_e5,balance_e5)
          VALUES($1,'demo-settlement','BRL',1000000000000000000,1000000000000000000),
@@ -39,7 +49,8 @@ export class Store {
     let discard: Error | undefined;
     try {
       await db.query('BEGIN');
-      if (serialize) await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [this.config.clientId]);
+      if (serialize)
+        await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [this.config.clientId]);
       const value = await fn(db);
       await db.query('COMMIT');
       return value;

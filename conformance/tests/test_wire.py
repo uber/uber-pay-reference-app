@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import subprocess
+import sys
 from pathlib import Path
 from conformance.wire import encode, keys
 from cryptography.hazmat.primitives import hashes
@@ -26,3 +28,24 @@ class WireTest(unittest.TestCase):
             self.assertEqual(
                 key.private_numbers(), keys(Path(directory)).private_numbers()
             )
+
+    def test_key_export_publishes_no_private_material(self):
+        with tempfile.TemporaryDirectory() as directory:
+            private = Path(directory) / "private"
+            public = Path(directory) / "public"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "conformance.dev_keys",
+                    "--directory",
+                    str(private),
+                    "--public-directory",
+                    str(public),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            self.assertEqual([p.name for p in public.iterdir()], ["uber-public.pem"])
+            self.assertIn(b"PUBLIC KEY", (public / "uber-public.pem").read_bytes())
+            self.assertNotIn(b"PRIVATE", (public / "uber-public.pem").read_bytes())

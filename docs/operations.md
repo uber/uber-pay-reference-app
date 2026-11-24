@@ -53,20 +53,34 @@ still repeat the same callback.
 
 ## Storage and deployment boundaries
 
-Expired tokens and historical operations/DONE jobs are **not automatically
-purged**. Replay, code-family revocation, callback ordering and financial
-reconciliation impose different retention needs; a blind TTL delete is unsafe.
-Use disposable local database/client namespaces. Do not claim bounded production
-retention or an erasure policy. A PSP must define reviewed per-record retention,
-archiving/purge and audit access before deployment (remaining M11 work).
+Every native worker performs bounded maintenance once per minute. Expired tokens
+are deleted only after their existing validity ends. Operations and DONE jobs
+older than7days move into immutable operations_archive/jobs_archive in batches of
+200 per table; reference_operations reads both hot and archive rows for exact
+replay. Failed/reconciling/pending/leased work is never purged. A database guard
+prevents an archived job identity from being requeued. Archive data is retained
+until deliberate disposal of the local namespace: no legal real-data erasure or
+production retention certification is implied. PostgreSQL vacuum and disk/backup
+policy remain deployment responsibilities.
+
+Manual bounded maintenance, with no test-control dependency:
+
+```sh
+.venv/bin/python -m tools.operations --client demo-client --maintain --batch-size 200
+```
 
 Public consent creation no longer takes the monetary per-client advisory lock,
-but it still persists short-lived consent rows. A real deployment needs edge
-rate limits, buffering, resource quotas and the retention policy above. The
+and is bounded by shared PostgreSQL counters:200/client/minute and60/actual peer
+IP/minute by default. Excess gets429 with Retry-After60 before consent storage.
+Old bucket rows expire. Signed money requests are not charged against this
+public budget. Real deployments still need edge buffering, quotas and abuse controls. The
 Java upload deadline and bounded payloads are defense in depth, not production
 availability certification.
 
 Keep processor encryption keys/configuration and the originating language
-runtime with unresolved local state. Durable cross-language storage migration
-and old ciphertext-format migration are not implemented. Do not switch profiles
-over an active client's database and assume hash/reference compatibility.
+runtime with unresolved local state. A persisted runtime_bindings row enforces the originating language, storage
+version and instrument-key hash. Startup rejects populated unversioned state,
+wrong-language reuse and silent instrument-key changes. Use a fresh CLIENT_ID
+and/or a fresh Compose project for a new runtime; no live migration is required.
+INSTRUMENT_FINGERPRINT_KEY is separate from CLIENT_SECRET and must remain stable.
+The included default is a disclosed synthetic-only value, never a production secret.

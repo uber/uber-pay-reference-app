@@ -269,3 +269,89 @@ CREATE TABLE IF NOT EXISTS operator_actions (
  reason TEXT NOT NULL, actor TEXT NOT NULL DEFAULT current_user,
  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Owner completion: bounded hot retention with lossless replay archives.
+CREATE TABLE IF NOT EXISTS operations_archive (LIKE operations INCLUDING ALL);
+CREATE TABLE IF NOT EXISTS jobs_archive (LIKE jobs INCLUDING ALL);
+ALTER TABLE operations_archive ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE jobs_archive ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ NOT NULL DEFAULT now();
+CREATE OR REPLACE VIEW reference_operations AS
+ SELECT client_id,operation_name,idem_key,fingerprint,status,response_body,response_headers,tx_id,created_at FROM operations
+ UNION ALL
+ SELECT client_id,operation_name,idem_key,fingerprint,status,response_body,response_headers,tx_id,created_at FROM operations_archive;
+CREATE TABLE IF NOT EXISTS runtime_bindings (
+ client_id TEXT PRIMARY KEY, runtime TEXT NOT NULL CHECK(runtime IN ('node','java','go')),
+ storage_version INTEGER NOT NULL, fingerprint_key_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE FUNCTION reference_bind_runtime(p_client TEXT,p_runtime TEXT,p_key_hash TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE b runtime_bindings%ROWTYPE;
+BEGIN
+ PERFORM pg_advisory_xact_lock(hashtextextended('runtime|'||p_client,0));
+ SELECT * INTO b FROM runtime_bindings WHERE client_id=p_client FOR UPDATE;
+ IF FOUND THEN
+  IF b.runtime<>p_runtime OR b.storage_version<>2 OR b.fingerprint_key_hash<>p_key_hash THEN
+   RAISE EXCEPTION 'Reference namespace requires its original runtime, storage version and instrument key; use a fresh namespace' USING ERRCODE='23514';
+  END IF;
+ ELSE
+  IF EXISTS(SELECT 1 FROM transactions WHERE client_id=p_client)
+     OR EXISTS(SELECT 1 FROM provider_intents WHERE client_id=p_client)
+     OR EXISTS(SELECT 1 FROM operations WHERE client_id=p_client)
+     OR EXISTS(SELECT 1 FROM tokens WHERE client_id=p_client)
+     OR EXISTS(SELECT 1 FROM jobs WHERE client_id=p_client) THEN
+   RAISE EXCEPTION 'Unversioned reference state cannot be implicitly migrated; use a fresh namespace' USING ERRCODE='23514';
+  END IF;
+  INSERT INTO runtime_bindings(client_id,runtime,storage_version,fingerprint_key_hash) VALUES(p_client,p_runtime,2,p_key_hash);
+ END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS public_buckets (
+ client_id TEXT NOT NULL, bucket TEXT NOT NULL, window_at TIMESTAMPTZ NOT NULL,
+ used INTEGER NOT NULL, PRIMARY KEY(client_id,bucket,window_at)
+);
+CREATE OR REPLACE FUNCTION reference_admit_consent(p_client TEXT,p_ip_hash TEXT,p_global INTEGER,p_ip INTEGER)
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+DECLARE n INTEGER; w TIMESTAMPTZ:=date_trunc('minute',clock_timestamp());
+BEGIN
+ IF p_global<1 OR p_ip<1 THEN RAISE EXCEPTION 'Positive consent limits required';END IF;
+ INSERT INTO public_buckets(client_id,bucket,window_at,used) VALUES(p_client,'global',w,1)
+ ON CONFLICT(client_id,bucket,window_at) DO UPDATE SET used=LEAST(public_buckets.used+1,p_global+1) RETURNING used INTO n;
+ IF n>p_global THEN RETURN FALSE;END IF;
+ INSERT INTO public_buckets(client_id,bucket,window_at,used) VALUES(p_client,'ip:'||p_ip_hash,w,1)
+ ON CONFLICT(client_id,bucket,window_at) DO UPDATE SET used=LEAST(public_buckets.used+1,p_ip+1) RETURNING used INTO n;
+ RETURN n<=p_ip;
+END $$;
+CREATE INDEX IF NOT EXISTS tokens_expiring ON tokens(client_id,expires_at);
+CREATE INDEX IF NOT EXISTS operations_retention ON operations(client_id,created_at);
+CREATE INDEX IF NOT EXISTS jobs_retention ON jobs(client_id,retry_started_at) WHERE status='DONE';
+CREATE OR REPLACE FUNCTION reference_skip_archived_job() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM jobs_archive WHERE id=NEW.id OR (client_id=NEW.client_id AND tx_kind=NEW.tx_kind AND tx_id=NEW.tx_id AND job_type=NEW.job_type AND callback_name=NEW.callback_name AND event_sequence=NEW.event_sequence)) THEN RETURN NULL;END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS skip_archived_job ON jobs;
+CREATE TRIGGER skip_archived_job BEFORE INSERT ON jobs FOR EACH ROW EXECUTE FUNCTION reference_skip_archived_job();
+CREATE OR REPLACE FUNCTION reference_maintain(p_client TEXT,p_limit INTEGER DEFAULT 200)
+RETURNS JSONB LANGUAGE plpgsql AS $$
+DECLARE n_tokens INTEGER:=0; n_operations INTEGER:=0; n_jobs INTEGER:=0;
+BEGIN
+ IF p_limit<1 OR p_limit>5000 THEN RAISE EXCEPTION 'Maintenance limit must be 1..5000';END IF;
+ IF NOT pg_try_advisory_xact_lock(hashtextextended('maintenance|'||p_client,0)) THEN RETURN '{}'::jsonb;END IF;
+ WITH candidates AS (SELECT token_hash FROM tokens WHERE client_id=p_client AND expires_at<now() ORDER BY expires_at LIMIT p_limit FOR UPDATE SKIP LOCKED)
+ DELETE FROM tokens USING candidates WHERE tokens.token_hash=candidates.token_hash;
+ GET DIAGNOSTICS n_tokens=ROW_COUNT;
+ WITH candidates AS (SELECT client_id,operation_name,idem_key FROM operations WHERE client_id=p_client AND created_at<now()-interval '7 days' ORDER BY created_at LIMIT p_limit FOR UPDATE SKIP LOCKED),
+ moved AS (DELETE FROM operations o USING candidates c WHERE o.client_id=c.client_id AND o.operation_name=c.operation_name AND o.idem_key=c.idem_key RETURNING o.*)
+ INSERT INTO operations_archive(client_id,operation_name,idem_key,fingerprint,status,response_body,response_headers,tx_id,created_at) SELECT client_id,operation_name,idem_key,fingerprint,status,response_body,response_headers,tx_id,created_at FROM moved;
+ GET DIAGNOSTICS n_operations=ROW_COUNT;
+ WITH candidates AS (SELECT id FROM jobs WHERE client_id=p_client AND status='DONE' AND lease_until IS NULL AND retry_started_at<now()-interval '7 days' ORDER BY retry_started_at LIMIT p_limit FOR UPDATE SKIP LOCKED),
+ moved AS (DELETE FROM jobs j USING candidates c WHERE j.id=c.id RETURNING j.*)
+ INSERT INTO jobs_archive(id,client_id,tx_kind,tx_id,job_type,callback_name,payload,status,attempts,next_attempt_at,lease_until,last_error,event_sequence,retry_started_at,retry_count_at_start)
+ SELECT id,client_id,tx_kind,tx_id,job_type,callback_name,payload,status,attempts,next_attempt_at,lease_until,last_error,event_sequence,retry_started_at,retry_count_at_start FROM moved;
+ GET DIAGNOSTICS n_jobs=ROW_COUNT;
+ DELETE FROM public_buckets WHERE client_id=p_client AND window_at<now()-interval '2 minutes';
+ RETURN jsonb_build_object('expired_tokens',n_tokens,'archived_operations',n_operations,'archived_jobs',n_jobs);
+END $$;
+DROP TRIGGER IF EXISTS immutable_operation_archive ON operations_archive;
+CREATE TRIGGER immutable_operation_archive BEFORE UPDATE OR DELETE ON operations_archive FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();
+DROP TRIGGER IF EXISTS immutable_job_archive ON jobs_archive;
+CREATE TRIGGER immutable_job_archive BEFORE UPDATE OR DELETE ON jobs_archive FOR EACH ROW EXECUTE FUNCTION reference_immutable_settlement();

@@ -108,7 +108,7 @@
       "id": "U13",
       "title": "Refund wire contract",
       "status": "accepted",
-      "choice": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
+      "choice": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse. Retain declared refund fields/statuses and idempotent local inverse/debt with protected unrelated holds.",
       "rationale": "Follow schemas; implement a durable, auditable local reversal policy rather than contradictory SUCCEEDED/FAILED examples.",
       "acceptance_test": "test_complete_refund_pending_rejection_and_reversal",
       "updated_on": "2026-11-24"
@@ -142,8 +142,8 @@
     {
       "id": "D2",
       "status": "accepted",
-      "choice": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
-      "rationale": "Upstream explicitly permits confirmed-to-rejected refund reversal; the ambiguity is the number of callback calls, not the transition.",
+      "choice": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse.",
+      "rationale": "Avoid requiring a disputed callback-count interpretation for the default example; do not fabricate external approval.",
       "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal"
     },
     {
@@ -152,6 +152,65 @@
       "choice": "Description type and maxLength256 remain mandatory. Pattern enforcement is opt-in STRICT_DESCRIPTION_PATTERN=true; default accepts punctuation and Unicode.",
       "rationale": "The published example violates its own pattern; never drop escaping or required payment identity/authorization.",
       "acceptance_test": "test_consolidated_r6_published_payload_and_each_erratum"
+    }
+  ],
+  "completed_on_local_date": "2026-11-24",
+  "completion_decisions": [
+    {
+      "id": "O1",
+      "title": "Refund reversal callback policy",
+      "status": "accepted",
+      "choice": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse.",
+      "rationale": "Avoid requiring a disputed callback-count interpretation for the default example; do not fabricate external approval.",
+      "acceptance_test": "test_owner2_strict_refund_default_and_lookup_scope"
+    },
+    {
+      "id": "O2",
+      "title": "Payout lookup scope",
+      "status": "accepted",
+      "choice": "Keep find-transaction limited to charges/refunds and return404 for payout IDs. Payout recovery uses original provider-key reconciliation and callbacks; do not add an undeclared public operation.",
+      "rationale": "The published scope is sufficiently explicit to make a reference-project decision without waiting for a speculative requirement.",
+      "acceptance_test": "test_owner2_strict_refund_default_and_lookup_scope"
+    },
+    {
+      "id": "O3",
+      "title": "Retention and exact replay",
+      "status": "accepted",
+      "choice": "Purge expired token records; archive operations and DONE jobs older than7days in bounded200-row batches once per minute. Keep unfinished work live and preserve immutable replay bytes, fingerprints, headers and event identities indefinitely in local archives.",
+      "rationale": "Bound the hot working set without breaking money idempotency, revocation of live grants, event ordering or financial evidence. This is not a legal real-data retention policy.",
+      "acceptance_test": "test_owner2_archive_preserves_replay_and_unresolved_work"
+    },
+    {
+      "id": "O4",
+      "title": "Public endpoint abuse controls",
+      "status": "accepted",
+      "choice": "Admit consent via atomic PostgreSQL fixed-minute counters: default200/client and60/peer IP, counting actual peer rather than forwarded headers. Reject with429/Retry-After60 before creating a consent row. Expire old buckets; signed money operations have separate admission. Validated OAuth internal failures redirect server_error with original state.",
+      "rationale": "Bound unauthenticated row growth and keep financial locks independent, while retaining external edge controls as deployment requirements.",
+      "acceptance_test": "test_owner2_authorize_server_error_and_bounded_abuse"
+    },
+    {
+      "id": "O5",
+      "title": "Runtime and identity stability",
+      "status": "accepted",
+      "choice": "Bind every fresh client namespace to native runtime, storage version2 and independent instrument-key hash. Reject legacy/unversioned populated state, cross-language reuse or silent fingerprint-key changes. Rotating OAuth client credentials does not rotate instrument identity.",
+      "rationale": "A fresh namespace is safer than inventing a migration for incompatible replay/ciphertext formats in a no-live-data reference repo.",
+      "acceptance_test": "test_owner2_runtime_guard_and_stable_instrument_rotation"
+    },
+    {
+      "id": "O6",
+      "title": "Semantic release gate",
+      "status": "accepted",
+      "choice": "Run the same independent wire scenarios for every language, including exactly-once ledger witnesses after crash/lost-response,100000-row index-plan regression, bounded public abuse, async/deposit/expiry/duplicate settlement events, multi-source/currency reporting, concurrent seals and commit-clock boundary checks.",
+      "rationale": "Operation/status coverage alone was insufficient; require meaningful behavioral and accounting evidence without claiming production scale certification.",
+      "acceptance_test": "test_owner2_settlement_lifecycles_and_concurrent_seals"
+    },
+    {
+      "id": "O7",
+      "title": "Supply-chain and key separation",
+      "status": "accepted",
+      "choice": "Pin all seven base/service images by verified manifest digest and all six official Actions by commit. Run fixture/keygen as non-root; export a public-only gateway key volume and keep the development private key only in the fixture/client volume.",
+      "rationale": "Prevent floating dependency drift and avoid granting the Java container access to a signing private key merely because Unix UIDs match.",
+      "acceptance_test": "test_pins_nonroot_execution_and_key_mount_separation"
     }
   ]
 }

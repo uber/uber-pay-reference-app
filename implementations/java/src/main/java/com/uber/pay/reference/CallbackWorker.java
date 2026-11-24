@@ -36,13 +36,45 @@ final class CallbackWorker implements AutoCloseable {
     contracts = ct;
   }
 
+  void jobStep(java.sql.Connection c, Map<String, Object> job, Database.Work<Void> run)
+      throws Exception {
+    var savepoint = c.setSavepoint();
+    try {
+      run.run(c);
+      c.releaseSavepoint(savepoint);
+    } catch (Exception e) {
+      c.rollback(savepoint);
+      Database.execute(
+          c,
+          "UPDATE jobs SET"
+              + " attempts=attempts+1,last_error='worker_item_unresolved',next_attempt_at=now()+(LEAST(60000,1000*power(2,LEAST(attempts,6)))*interval"
+              + " '1 millisecond') WHERE id=?",
+          job.get("id"));
+      System.err.println(
+          "worker_item_failed job_id="
+              + job.get("id")
+              + " error_type="
+              + e.getClass().getSimpleName());
+    }
+  }
+
   void start() {
     executor.scheduleWithFixedDelay(
         this::tick, config.interval, config.interval, TimeUnit.MILLISECONDS);
   }
 
+  long nextMaintenance = 0;
+
   void tick() {
     try {
+      if (System.currentTimeMillis() >= nextMaintenance) {
+        nextMaintenance = System.currentTimeMillis() + 60000;
+        db.raw(
+            c -> {
+              Database.execute(c, "SELECT reference_maintain(?,?)", config.client, 200);
+              return null;
+            });
+      }
       db.atomic(
           c -> {
             for (var t :
@@ -55,15 +87,22 @@ final class CallbackWorker implements AutoCloseable {
                 Database.query(
                     c,
                     "SELECT * FROM jobs WHERE client_id=? AND job_type='COMPLETION' AND"
-                        + " status='WAITING' AND (payload::jsonb->>'expires_at')::bigint<=?",
+                        + " status='WAITING' AND next_attempt_at<=now() AND"
+                        + " (payload::jsonb->>'expires_at')::bigint<=?",
                     config.client,
                     System.currentTimeMillis())) {
-              payments.complete(
+              jobStep(
                   c,
-                  Database.str(waiting, "tx_kind"),
-                  Database.str(waiting, "tx_id"),
-                  "REJECTED",
-                  "MERCHANT_EXPIRED");
+                  waiting,
+                  x -> {
+                    payments.complete(
+                        x,
+                        Database.str(waiting, "tx_kind"),
+                        Database.str(waiting, "tx_id"),
+                        "REJECTED",
+                        "MERCHANT_EXPIRED");
+                    return null;
+                  });
             }
             for (var j :
                 Database.query(
@@ -104,8 +143,15 @@ final class CallbackWorker implements AutoCloseable {
                     "SELECT * FROM jobs WHERE client_id=? AND job_type='REVERSAL' AND"
                         + " status='PENDING' AND next_attempt_at<=now()",
                     config.client)) {
-              payments.reverseRefund(c, Database.str(review, "tx_id"));
-              Database.execute(c, "UPDATE jobs SET status='DONE' WHERE id=?", review.get("id"));
+              jobStep(
+                  c,
+                  review,
+                  x -> {
+                    payments.reverseRefund(x, Database.str(review, "tx_id"));
+                    Database.execute(
+                        x, "UPDATE jobs SET status='DONE' WHERE id=?", review.get("id"));
+                    return null;
+                  });
             }
             return null;
           });

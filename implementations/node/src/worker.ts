@@ -6,6 +6,7 @@ export class Worker {
   private timer?: NodeJS.Timeout;
   private running = false;
   private stopped = false;
+  private nextMaintenance = 0;
   private readonly tokens = new Map<string, { value: string; expires: number }>();
   private readonly renewing = new Map<string, Promise<string>>();
   constructor(readonly service: Service) {}
@@ -84,6 +85,10 @@ export class Worker {
     this.running = true;
     try {
       const { store, config } = this.service;
+      if (Date.now() >= this.nextMaintenance) {
+        this.nextMaintenance = Date.now() + 60000;
+        await store.pool.query('SELECT reference_maintain($1,$2)', [config.clientId, 200]);
+      }
       await store.transaction(async (db) => {
         const expiring = await db.query(
           `SELECT * FROM transactions WHERE client_id=$1 AND state='AUTHORIZED' AND expires_at<=now()`,
@@ -91,7 +96,7 @@ export class Worker {
         );
         for (const tx of expiring.rows) await this.service.expire(db, tx, false);
         const actions = await db.query(
-          `SELECT * FROM jobs WHERE client_id=$1 AND job_type='COMPLETION' AND status='WAITING'`,
+          `SELECT * FROM jobs WHERE client_id=$1 AND job_type='COMPLETION' AND status='WAITING' AND next_attempt_at<=now()`,
           [config.clientId],
         );
         for (const action of actions.rows) {

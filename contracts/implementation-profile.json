@@ -46,7 +46,11 @@
     "RETURN_URL_ALLOWLIST": "uber://payments/,uber://ubercash_topup,http://127.0.0.1:9090/return",
     "STRICT_DESCRIPTION_PATTERN": "false",
     "ENABLE_CANCELLED_LOOKUP": "false",
-    "UBER_SIGNING_KEYS_FILE": ""
+    "UBER_SIGNING_KEYS_FILE": "",
+    "INSTRUMENT_FINGERPRINT_KEY": "local-synthetic-instrument-key-v1-only",
+    "PUBLIC_CONSENT_GLOBAL_PER_MINUTE": "200",
+    "PUBLIC_CONSENT_IP_PER_MINUTE": "60",
+    "ENABLE_ASYNC_REFUND_REVERSAL": "false"
   },
   "startup": "Run from repository root; execute shared CREATE IF NOT EXISTS migration at startup. GET /health checks DB readiness. Reject any MODE other than local. Containers use HOST=0.0.0.0 explicitly.",
   "accounts": {
@@ -143,7 +147,7 @@
   ],
   "processor_executor": "Optional native local HTTP executor: encrypted durable command+configuration hash, stable provider key, resource/debit/credit reservations, prepare -> HTTP outside SQL -> fenced finalization. Poll or authenticated versioned /adapter/events; uncertain outcome retains reservations and returns retryable500, never a cached5xx. Independent fixture and protocol are reference-only; real modes remain disabled. Serialize both idempotency key and resource. Lock payout accounts in sorted order during prepare/finalize; unchanged-version polling advances scheduling. Transport budget24h with capped exponential backoff; inspect/re-drive RECONCILE while retaining reservations. AES-GCM AAD includes client, intent, operation and resource.",
   "funding_profiles": "reference-features.json owns synthetic profiles/reasons and en-US/pt-BR copy. FUNDING_METHODS_FILE maps an assigned alias to a demo profile with explicit countries/currencies. Configuration cannot change while intents are outstanding. This is not Uber registration.",
-  "refund_reversal": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
+  "refund_reversal": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse.",
   "enum_applicability": {
     "OAuth2Error.unauthorized_client": "Not emitted by the single registered local client, which is enabled for all three declared grants. A multi-client PSP must add grant authorization policy.",
     "OAuth2Error.unsupported_token_type": "Revocation-only code; there is no token-revocation operation in this pinned API surface."
@@ -153,5 +157,8 @@
   "settlement": "Accepted reference U15: immutable commit-time journal, closed UTC daily periods (or explicit closed library windows), canonical per-source JSONL with decimal-string E5 and per-currency totals, sealed checksummed manifest, no overlapping batches, idempotent atomic directory or pinned-host-key local SFTP publication outside SQL. Delivery receipt is not financial acceptance. See contracts/settlement-reference.schema.json and docs/settlement.md.",
   "runtime_extensions": [
     "U4: /find-transaction status enum includes CANCELLED in derived runtime only; unchanged upstream pin and hash remain authoritative evidence of the published source."
-  ]
+  ],
+  "retention": "Purge expired token records; archive operations and DONE jobs older than7days in bounded200-row batches once per minute. Keep unfinished work live and preserve immutable replay bytes, fingerprints, headers and event identities indefinitely in local archives.",
+  "runtime_binding": "Bind every fresh client namespace to native runtime, storage version2 and independent instrument-key hash. Reject legacy/unversioned populated state, cross-language reuse or silent fingerprint-key changes. Rotating OAuth client credentials does not rotate instrument identity.",
+  "supply_chain": "contracts/supply-chain-lock.json; offline consistency gate in make contract; non-root fixture and public-only gateway key mounts."
 }

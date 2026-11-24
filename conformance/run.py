@@ -259,6 +259,8 @@ def main():
             UBER_KEY_ID="demo-uber-key",
             CLIENT_ID=namespace,
             CLIENT_SECRET="demo-secret",
+            INSTRUMENT_FINGERPRINT_KEY="synthetic-conformance-instrument-key-v2",
+            ENABLE_ASYNC_REFUND_REVERSAL="true",
             UBER_CLIENT_ID="demo-uber-client",
             UBER_CLIENT_SECRET="demo-uber-secret",
             UBER_CALLBACK_BASE_URL=mock.url,

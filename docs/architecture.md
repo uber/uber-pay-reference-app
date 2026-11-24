@@ -75,3 +75,14 @@ and exact per-source JSONL plus checksummed manifest in SQL, releases its
 connection before atomic directory/SFTP transfer, then records a transport-only
 receipt separately. Overlapping periods and conflicting immutable destinations
 fail closed. See `settlement.md` and `contracts/settlement-reference.schema.json`.
+
+
+## Completed maintenance and storage boundary
+
+Every fresh client namespace is bound to runtime, storage version2 and a stable
+instrument-key hash. Unknown populated legacy state and incompatible reuse fail
+startup. Public consent uses atomic per-client/per-peer PostgreSQL admission;
+it never acquires the money lock. Native workers run bounded expired-token/bucket
+cleanup and immutable seven-day hot operations/DONE-job archival once per minute.
+All replay reads include archives; unfinished work is retained. See operations.md
+and contracts/decisions.json O1–O7. No real-money migration or erasure policy is implied.

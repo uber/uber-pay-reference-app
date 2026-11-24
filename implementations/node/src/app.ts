@@ -79,6 +79,19 @@ export function createApp(
         !config.allowedRedirects.includes(query.redirect_uri)
       )
         throw new Failure(400);
+      const admitted = (
+        await store.pool.query('SELECT reference_admit_consent($1,$2,$3,$4) AS admitted', [
+          config.clientId,
+          hash(req.socket.remoteAddress ?? 'local'),
+          config.consentGlobal,
+          config.consentIP,
+        ])
+      ).rows[0].admitted;
+      if (!admitted) {
+        res.setHeader('Retry-After', '60');
+        res.status(429).end();
+        return;
+      }
       const { consent, csrf, locale, details } = await service.authorize(query);
       const text = (key: string) => html(service.features.text(locale, key));
       res.setHeader('Content-Language', locale);
@@ -97,8 +110,7 @@ export function createApp(
     } catch (error) {
       if (
         query?.client_id === config.clientId &&
-        config.allowedRedirects.includes(query.redirect_uri) &&
-        (error instanceof Failure || error instanceof SyntaxError || error instanceof ContractError)
+        config.allowedRedirects.includes(query.redirect_uri)
       ) {
         const target = new URL(query.redirect_uri);
         target.searchParams.set(
@@ -106,7 +118,11 @@ export function createApp(
           error instanceof Failure &&
             ['invalid_scope', 'unsupported_response_type'].includes(error.detail)
             ? error.detail
-            : 'invalid_request',
+            : error instanceof Failure ||
+                error instanceof SyntaxError ||
+                error instanceof ContractError
+              ? 'invalid_request'
+              : 'server_error',
         );
         if (typeof query.state === 'string') target.searchParams.set('state', query.state);
         res.redirect(302, target.toString());
@@ -309,7 +325,13 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
         config.skewSeconds,
       );
     } catch {
-      send(res, service.error(op, 401));
+      const failure = service.error(op, 401);
+      if (failure.body)
+        failure.body.error_description = service.features.text(
+          req.get('accept-language') ?? '',
+          'http_' + failure.status,
+        );
+      send(res, failure);
       return;
     }
     try {
@@ -386,10 +408,17 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
               error instanceof URIError
             ? 400
             : 500;
-      send(
-        res,
-        service.error(op, status, error instanceof Failure ? error.detail : 'VALIDATION_ERROR'),
+      const failure = service.error(
+        op,
+        status,
+        error instanceof Failure ? error.detail : 'VALIDATION_ERROR',
       );
+      if (failure.body)
+        failure.body.error_description = service.features.text(
+          req.get('accept-language') ?? '',
+          'http_' + failure.status,
+        );
+      send(res, failure);
     }
   });
   app.use((error: Json, _req: Request, res: Response, _next: express.NextFunction) => {

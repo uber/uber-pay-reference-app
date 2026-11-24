@@ -15,6 +15,9 @@ import (
 )
 
 type Config struct {
+	FingerprintKey                                                                            string
+	ConsentGlobal, ConsentIP                                                                  int
+	AsyncRefundReversal                                                                       bool
 	ReturnURLs                                                                                []string
 	StrictDescription, CancelledLookup                                                        bool
 	CallbackBudget, ProcessorBudget                                                           time.Duration
@@ -117,6 +120,19 @@ func LoadConfig() (Config, error) {
 		return c, errors.New("local mode refuses a nonlocal database")
 	}
 
+	c.FingerprintKey = env("INSTRUMENT_FINGERPRINT_KEY", "local-synthetic-instrument-key-v1-only")
+	if len(c.FingerprintKey) < 32 {
+		return c, errors.New("instrument key must be at least 32 characters")
+	}
+	c.ConsentGlobal, e = strconv.Atoi(env("PUBLIC_CONSENT_GLOBAL_PER_MINUTE", "200"))
+	if e != nil || c.ConsentGlobal < 1 {
+		return c, errors.New("invalid consent global limit")
+	}
+	c.ConsentIP, e = strconv.Atoi(env("PUBLIC_CONSENT_IP_PER_MINUTE", "60"))
+	if e != nil || c.ConsentIP < 1 {
+		return c, errors.New("invalid consent IP limit")
+	}
+	c.AsyncRefundReversal = env("ENABLE_ASYNC_REFUND_REVERSAL", "false") == "true"
 	c.ClientID = env("CLIENT_ID", "demo-client")
 	c.ClientSecret = env("CLIENT_SECRET", "demo-secret")
 	c.UberClientID = env("UBER_CLIENT_ID", "demo-uber-client")

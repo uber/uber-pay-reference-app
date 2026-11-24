@@ -1,5 +1,7 @@
 # PR #1 review disposition
 
+Current owner-completed status: see `completion-qualification.md` and `contracts/decisions.json` O1–O7. Earlier findings below are historical follow-up evidence, not an unresolved current backlog.
+
 This is a **local, synthetic-money reference implementation**, not Uber sandbox
 qualification. The source v1.4 pin is unchanged. The user delegated reference-project design authority: **U1–U15 are now accepted
 and implemented reference choices** in contracts/decisions.json, with rationale

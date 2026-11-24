@@ -54,6 +54,12 @@ final class Database implements AutoCloseable {
       try (Statement st = c.createStatement()) {
         st.execute(sql);
       }
+      execute(
+          c,
+          "SELECT reference_bind_runtime(?,?,?)",
+          config.client,
+          "java",
+          Json.hash(config.fingerprintKey));
       for (String account : List.of("demo-account", "demo-settlement", "insufficient-account"))
         execute(
             c,

@@ -102,3 +102,16 @@ are **upstream-deprecated**, opt-in legacy examples. See
 [review dispositions](docs/review-2026-11-24.md),
 [operator re-drive and elapsed retry budgets](docs/operations.md), and
 [published-example/field mapping](docs/psp-integration.md).
+
+
+### Completed reference-owner policies
+
+O1–O7 in the decision register close the remaining reference choices. Consent has
+shared per-client/per-peer limits, expired tokens are purged and old completed
+hot rows are archived without losing replay. Namespaces reject a runtime/storage
+or instrument-key mismatch; select a fresh CLIENT_ID/Compose project for another
+language or pre-binding local data. The two-update refund demonstration requires
+ENABLE_ASYNC_REFUND_REVERSAL=true; the default single-reversal example is
+DEMO_REFUND_SYNC_REVERSAL. All base images/Actions are immutable pins and gateways
+receive public signing keys only. See docs/completion-qualification.md for exact
+scope and test evidence. No sandbox/live-money approval is implied.

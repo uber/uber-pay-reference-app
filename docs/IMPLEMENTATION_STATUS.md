@@ -25,17 +25,17 @@ make verify DATABASE_URL=postgresql://uberpay@127.0.0.1:55432/uberpay
 | Check | Result |
 |---|---|
 | Pinned source hash, documented runtime normalization, 53 schemas, 142 references | Passed |
-| Python fixture/codec/packaging unit tests | 32 passed |
+| Python fixture/codec/packaging unit tests | 35 passed |
 | Node native unit/security tests | 14 passed |
 | Java native unit/security tests | 13 passed |
 | Go native tests with race detector | Passed; 8 native tests with subcases |
-| Independent Node wire conformance | 120 passed, 0 failed, 0 skipped |
-| Independent Java wire conformance | 120 passed, 0 failed, 0 skipped |
-| Independent Go wire conformance | 120 passed, 0 failed, 0 skipped |
+| Independent Node wire conformance | 129 passed, 0 failed, 0 skipped |
+| Independent Java wire conformance | 129 passed, 0 failed, 0 skipped |
+| Independent Go wire conformance | 129 passed, 0 failed, 0 skipped |
 | Python lint/format and Go vet | Passed |
 | PostgreSQL migration up/repeated-up/down in rollback-only isolated schema | Passed |
 
-The 360 wire cases exercise all 32 declared operation/status pairs per language. They include exact integers above 2^53, raw signature failures, concurrent duplicates, capture/cancel races, OAuth consent and grant reuse, refund limits, all six callbacks, transient/permanent failures, retry exhaustion and recovery after SIGKILL. They use synthetic funds only. JSON/JUnit reports and native server logs are in ignored `.artifacts/conformance/`; the current aggregate log is `.artifacts/review2-final-verify.log`.
+The 387 wire cases exercise all 32 declared operation/status pairs per language. They include exact integers above 2^53, raw signature failures, concurrent duplicates, capture/cancel races, OAuth consent and grant reuse, refund limits, all six callbacks, transient/permanent failures, retry exhaustion and recovery after SIGKILL. They use synthetic funds only. JSON/JUnit reports and native server logs are in ignored `.artifacts/conformance/`; the current aggregate log is `.artifacts/owner2-final-verify.log`.
 
 ## Not verified or not bundled
 
@@ -62,12 +62,24 @@ The update includes elapsed24h retry budgets, Retry-After, auditable operator
 re-drive, fair provider polling, idempotency-key serialization, sorted payout
 account locking, Java ownership/strict parsing/nonblocking uploads, signing-key
 overlap, instrument-label/fingerprint parity and short-barrier settlement export.
-See review-2026-11-24.md for exact dispositions and **remaining nonblocking work**,
-notably retention, deeper settlement/scale coverage, cosmetic parity and supply
-chain pinning, plus real external callback-count/payout-lookup clarifications.
-No external approval was invented. The live Google Doc has not been edited in
-this review pass; a separate tab-by-tab update checklist was prepared.
+Delegated-owner O1–O7 completion closes the remaining reference decisions and
+implementation/coverage work: replay-preserving archives, consent budgets, stable
+runtime/instrument identity, error/expiry parity, fault-ledger and settlement/scale
+regressions, immutable supply-chain pins and isolated non-root key fixtures. See
+completion-qualification.md for exact boundaries and evidence; real deployment
+qualification is not fabricated by a reference-owner choice. The existing Google Doc is now updated and read-back verified across Main ERD,
+separate Low Level Design and Other considerations; tab identities and the original
+diagram are preserved, all placeholder answers/table cells are completed, and
+proof is retained in the sibling context/erd folder.
 
 `aifx verify` exits0 with “No monorepo config and no custom config found”; it adds
 no repository-specific checks here. The explicit make verify command above and
 current-head CI are the executed validation evidence.
+
+## Owner completion
+
+O1–O7 acceptance tests and scope are recorded in contracts/decisions.json and
+docs/completion-qualification.md. Nine additional wire cases per runtime close
+the remaining source-review gaps. Operations/DONE jobs archive safely after7days;
+expired token cleanup and public admission are implemented, while real-data legal
+retention/erasure and real deployment qualification remain explicitly outside scope.

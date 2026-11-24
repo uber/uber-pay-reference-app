@@ -528,7 +528,15 @@
       "scopes": "Requested permissions",
       "synthetic": "Synthetic funds only",
       "invalid_request": "Invalid request",
-      "amount": "Amount (E5)"
+      "amount": "Amount (E5)",
+      "http_400": "Invalid request",
+      "http_401": "Authentication required",
+      "http_403": "Access denied",
+      "http_404": "Resource not found",
+      "http_409": "Request conflicts with the current state",
+      "http_422": "Payment could not be processed",
+      "http_429": "Too many requests",
+      "http_500": "Service temporarily unavailable"
     },
     "pt-BR": {
       "consent_title": "Consentimento da carteira local",
@@ -538,11 +546,19 @@
       "deny": "Negar",
       "reject": "Rejeitar",
       "method": "Forma de pagamento",
-      "country": "Pa\u00eds",
-      "scopes": "Permiss\u00f5es solicitadas",
+      "country": "País",
+      "scopes": "Permissões solicitadas",
       "synthetic": "Somente saldo simulado",
-      "invalid_request": "Solicita\u00e7\u00e3o inv\u00e1lida",
-      "amount": "Valor (E5)"
+      "invalid_request": "Solicitação inválida",
+      "amount": "Valor (E5)",
+      "http_400": "Solicitação inválida",
+      "http_401": "Autenticação necessária",
+      "http_403": "Acesso negado",
+      "http_404": "Recurso não encontrado",
+      "http_409": "Conflito com o estado atual",
+      "http_422": "Não foi possível processar o pagamento",
+      "http_429": "Muitas solicitações",
+      "http_500": "Serviço temporariamente indisponível"
     }
   },
   "policy_version": "2026-11-20-owner-decisions"

@@ -17,6 +17,16 @@ public interface WalletProvider {
 }
 
 final class DemoWalletProvider implements WalletProvider {
+  final String fingerprintKey;
+
+  DemoWalletProvider() {
+    this("local-synthetic-instrument-key-v1-only");
+  }
+
+  DemoWalletProvider(String key) {
+    fingerprintKey = key;
+  }
+
   public boolean isLocalOnly() {
     return true;
   }
@@ -36,6 +46,20 @@ final class DemoWalletProvider implements WalletProvider {
   public Identity describeAccount(String accountId) {
     if (!accountId.equals("demo-account"))
       throw new ApiError(400, "invalid_grant", "Unknown demo identity");
-    return new Identity(accountId, Json.hash(accountId), "Local demo wallet");
+    try {
+      var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(
+          new javax.crypto.spec.SecretKeySpec(
+              fingerprintKey.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+      String fingerprint =
+          java.util.HexFormat.of()
+              .formatHex(
+                  mac.doFinal(
+                      ("uberpay-instrument-v1|" + accountId)
+                          .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      return new Identity(accountId, fingerprint, "Local demo wallet");
+    } catch (java.security.GeneralSecurityException e) {
+      throw new IllegalStateException("Instrument identity unavailable", e);
+    }
   }
 }

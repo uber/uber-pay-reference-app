@@ -25,7 +25,7 @@ x-gateway-depends: &gateway-depends
     condition: service_healthy
 services:
   db:
-    image: postgres:17
+    image: postgres:17@sha256:cdbfb3de010ef603c29f10a5dfc79e023f66ad662ec6fddcda7130afe5d65e7b
     environment:
       POSTGRES_USER: uberpay
       POSTGRES_PASSWORD: uberpay
@@ -43,9 +43,10 @@ services:
     build:
       context: .
       dockerfile: conformance/Dockerfile
-    command: ["python", "-m", "conformance.dev_keys", "--directory", "/keys"]
+    command: ["python", "-m", "conformance.dev_keys", "--directory", "/keys", "--public-directory", "/public-keys"]
     volumes:
       - dev-keys:/keys
+      - public-keys:/public-keys
   mock-uber:
     build:
       context: .
@@ -67,7 +68,7 @@ services:
     environment: *gateway-environment
     depends_on: *gateway-depends
     ports: ["127.0.0.1:8080:8080"]
-    volumes: ["dev-keys:/keys:ro"]
+    volumes: ["public-keys:/keys:ro"]
   java:
     profiles: ["java"]
     build:
@@ -76,7 +77,7 @@ services:
     environment: *gateway-environment
     depends_on: *gateway-depends
     ports: ["127.0.0.1:8080:8080"]
-    volumes: ["dev-keys:/keys:ro"]
+    volumes: ["public-keys:/keys:ro"]
   go:
     profiles: ["go"]
     build:
@@ -85,7 +86,8 @@ services:
     environment: *gateway-environment
     depends_on: *gateway-depends
     ports: ["127.0.0.1:8080:8080"]
-    volumes: ["dev-keys:/keys:ro"]
+    volumes: ["public-keys:/keys:ro"]
 volumes:
   reference-data:
   dev-keys:
+  public-keys:

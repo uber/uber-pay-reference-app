@@ -125,9 +125,9 @@
     },
     {
       "id": "refund-request-response",
-      "kind": "accepted reference decision",
+      "kind": "accepted reference policy",
       "decision": "U13",
-      "reason": "Use declared refund fields and201 CONFIRMED/PENDING/REJECTED, including failed_reason for rejection. DEMO_REFUND_SYNC_REVERSAL starts201 CONFIRMED and sends one REJECTED updateRefund. The opt-in async two-callback variant remains ordered and explicitly awaits external clarification of should-be-called-only-once; reversal itself is allowed. Retain exactly-once inverse/debt accounting.",
+      "reason": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse. This is a delegated reference-owner decision, not an answer received from Uber.",
       "status": "accepted",
       "review_decision": "D2"
     },
@@ -166,10 +166,10 @@
     },
     {
       "id": "refund-reversal-callback-count",
-      "kind": "external clarification",
+      "kind": "accepted reference policy",
       "decision": "D2",
-      "reason": "Reversal itself is explicitly allowed. Synchronous201 CONFIRMED followed by a single REJECTED callback is the recommended reference example. The opt-in asynchronous CONFIRMED then REJECTED two-call example awaits external confirmation of the callback-count wording. No Uber answer has been received.",
-      "status": "pending external confirmation"
+      "reason": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse. This is a delegated reference-owner decision, not an answer received from Uber.",
+      "status": "accepted"
     },
     {
       "id": "oauth-exact-redirect-registration",
@@ -191,9 +191,21 @@
     },
     {
       "id": "payout-lookup-scope",
-      "kind": "external clarification",
-      "reason": "find-transaction remains charge/refund only per the published prose. Payout IDs return404; use durable processor reconciliation and callbacks. Whether Uber needs payout lookup requires actual onboarding confirmation; no external answer is invented.",
-      "status": "pending external confirmation"
+      "kind": "accepted reference scope",
+      "reason": "Keep find-transaction limited to charges/refunds and return404 for payout IDs. Payout recovery uses original provider-key reconciliation and callbacks; do not add an undeclared public operation.",
+      "status": "accepted"
+    },
+    {
+      "id": "public-consent-admission",
+      "kind": "reference operational protection",
+      "status": "accepted",
+      "reason": "Unsigned consent is rate-limited before persistence with429 and Retry-After60; validated internal errors use registered OAuth server_error redirects. No signed money-operation status is changed."
+    },
+    {
+      "id": "runtime-storage-boundary",
+      "kind": "reference storage policy",
+      "status": "accepted",
+      "reason": "Bind every fresh client namespace to native runtime, storage version2 and independent instrument-key hash. Reject legacy/unversioned populated state, cross-language reuse or silent fingerprint-key changes. Rotating OAuth client credentials does not rotate instrument identity."
     }
   ],
   "decision_register": "decisions.json",

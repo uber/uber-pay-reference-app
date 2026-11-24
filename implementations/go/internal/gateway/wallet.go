@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -93,15 +94,26 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx := r.Context()
+	address, _, _ := net.SplitHostPort(r.RemoteAddr)
+	var admitted bool
+	if err := a.Store.Pool.QueryRow(ctx, "SELECT reference_admit_consent($1,$2,$3,$4)", a.Config.ClientID, fingerprint(address), a.Config.ConsentGlobal, a.Config.ConsentIP).Scan(&admitted); err != nil {
+		bad("server_error")
+		return
+	}
+	if !admitted {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(429)
+		return
+	}
 	tx, e := a.Store.Pool.Begin(ctx)
 	if e != nil {
-		w.WriteHeader(500)
+		bad("server_error")
 		return
 	}
 	defer tx.Rollback(ctx)
 	identity, err := a.Wallet.ConsentIdentity(ctx, arr)
 	if err != nil {
-		w.WriteHeader(400)
+		bad("server_error")
 		return
 	}
 	language := locale(str(object(arr[0]), "locale"))
@@ -113,7 +125,7 @@ func (a *App) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	token, e := a.putToken(ctx, tx, "CONSENT", identity.AccountID, q.Get("scope"), q.Get("redirect_uri"), encode(Object{"state": q.Get("state"), "locale": language, "details": arr}), 10*time.Minute)
 	if e != nil || tx.Commit(ctx) != nil {
-		w.WriteHeader(500)
+		bad("server_error")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -301,7 +313,7 @@ func (a *App) token(w http.ResponseWriter, r *http.Request, b Object) {
 	if grant != "refresh_token" {
 		out["refresh_token"] = refresh
 		out["scope"] = scope
-		mac := hmac.New(sha256.New, []byte(a.Config.ClientSecret))
+		mac := hmac.New(sha256.New, []byte(a.Config.FingerprintKey))
 		mac.Write([]byte("uberpay-instrument-v1|" + account))
 		display := str(object(b["wallet_reference_data"]), "display_name")
 		if display == "" {

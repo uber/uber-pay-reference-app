@@ -34,3 +34,20 @@ class OwnerDecisionTest(unittest.TestCase):
 
         self.assertNotIn("CANCELLED", statuses(upstream))
         self.assertEqual(set(statuses(SPEC)) - set(statuses(upstream)), {"CANCELLED"})
+
+    def test_completion_decisions_have_executable_evidence(self):
+        register = json.loads((ROOT / "contracts/decisions.json").read_text())
+        tests = {
+            n.name
+            for p in (ROOT / "conformance").rglob("*.py")
+            for n in ast.walk(ast.parse(p.read_text()))
+            if isinstance(n, ast.FunctionDef)
+        }
+        self.assertEqual(
+            {r["id"] for r in register["completion_decisions"]},
+            {f"O{i}" for i in range(1, 8)},
+        )
+        for choice in register["completion_decisions"]:
+            self.assertEqual(choice["status"], "accepted")
+            self.assertIn(choice["acceptance_test"], tests)
+            self.assertTrue(choice["choice"] and choice["rationale"])

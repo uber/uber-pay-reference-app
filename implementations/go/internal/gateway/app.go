@@ -268,7 +268,7 @@ func (a *App) operationTx(ctx context.Context, tx pgx.Tx, pattern, op, id string
 		var oldhash, oldbody string
 		var oldheaders []byte
 		var status int
-		err := tx.QueryRow(ctx, "SELECT fingerprint,status,response_body,response_headers FROM operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3", a.Config.ClientID, op, key).Scan(&oldhash, &status, &oldbody, &oldheaders)
+		err := tx.QueryRow(ctx, "SELECT fingerprint,status,response_body,response_headers FROM reference_operations WHERE client_id=$1 AND operation_name=$2 AND idem_key=$3", a.Config.ClientID, op, key).Scan(&oldhash, &status, &oldbody, &oldheaders)
 		if err == nil {
 			if oldhash != hash {
 				return a.failure(pattern, map[bool]int{true: 409, false: 400}[op == "payout"], map[bool]string{true: "DUPLICATE_REQUEST_ERROR", false: "VALIDATION_ERROR"}[op == "payout"]), nil
@@ -297,7 +297,7 @@ func (a *App) operationTx(ctx context.Context, tx pgx.Tx, pattern, op, id string
 			return Reply{}, e
 		}
 		out := object(v)
-		out["error_description"] = a.Features.Text(reply.Headers["Content-Language"], "invalid_request")
+		out["error_description"] = a.Features.Text(reply.Headers["Content-Language"], fmt.Sprintf("http_%d", reply.Status))
 		reply.Body = encode(out)
 	}
 	if reply.Body != "" {
@@ -324,7 +324,7 @@ func (a *App) write(w http.ResponseWriter, r Reply) {
 		if err == nil {
 			body := object(v)
 			if _, present := body["error_description"]; !present {
-				body["error_description"] = a.Features.Text(w.Header().Get("Content-Language"), "invalid_request")
+				body["error_description"] = a.Features.Text(w.Header().Get("Content-Language"), fmt.Sprintf("http_%d", r.Status))
 			}
 			r.Body = encode(body)
 		}
@@ -772,6 +772,10 @@ func (a *App) refund(ctx context.Context, tx pgx.Tx, b Object, hash string) (Rep
 		return Reply{Status: 400}, nil
 	}
 	t := Transaction{Source: original.Source, Profile: original.Profile, Kind: "refund", ID: id, Ref: "psp-" + fingerprint("refund:" + id)[:24], Original: original.ID, Account: original.Account, Amount: n, Currency: c, Capture: "AUTOMATIC", Funding: original.Funding, State: "CONFIRMED", Hash: hash, Status: 201}
+	originalProfile, _ := DecodeJSON([]byte(original.Profile))
+	if str(object(originalProfile), "behavior") == "refund_reversal" && !a.Config.AsyncRefundReversal {
+		return a.failure("/refund", 400, "VALIDATION_ERROR"), nil
+	}
 	result, err := a.Adapter.Refund(ctx, PaymentCommand{Request: b, ID: id, Account: original.Account, Currency: c, FundingMethod: original.Funding, ProviderKey: fingerprint(a.Config.ClientID + ":refund:" + id), AmountE5: n})
 	if err != nil {
 		return Reply{}, err

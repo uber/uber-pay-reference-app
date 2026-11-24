@@ -76,8 +76,8 @@ public class Application {
 
   @Bean
   @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(WalletProvider.class)
-  WalletProvider walletProvider() {
-    return new DemoWalletProvider();
+  WalletProvider walletProvider(Config c) {
+    return new DemoWalletProvider(c.fingerprintKey);
   }
 
   @Bean

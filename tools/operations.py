@@ -83,9 +83,17 @@ def main():
     p.add_argument("--redrive", choices=["callback", "intent"])
     p.add_argument("--id")
     p.add_argument("--reason", default="")
+    p.add_argument(
+        "--maintain",
+        action="store_true",
+        help="Purge expired tokens and archive safe old hot rows",
+    )
+    p.add_argument("--batch-size", type=int, default=200)
     args = p.parse_args()
     if not args.database_url or args.redrive and not args.id:
         p.error("database URL and a re-drive work ID are required")
+    if args.maintain and args.redrive:
+        p.error("Choose inspection, maintenance or re-drive")
     if urlsplit(args.database_url).hostname not in {
         "localhost",
         "127.0.0.1",
@@ -95,11 +103,17 @@ def main():
     }:
         p.error("Reference operations refuses nonlocal databases")
     with psycopg.connect(args.database_url, row_factory=dict_row) as db:
-        value = (
-            redrive(db, args.client, args.redrive, args.id, args.reason)
-            if args.redrive
-            else inspect(db, args.client)
-        )
+        if args.maintain:
+            value = db.execute(
+                "SELECT reference_maintain(%s,%s) AS maintenance",
+                (args.client, args.batch_size),
+            ).fetchone()
+        else:
+            value = (
+                redrive(db, args.client, args.redrive, args.id, args.reason)
+                if args.redrive
+                else inspect(db, args.client)
+            )
     print(json.dumps(value, default=str))
 
 
