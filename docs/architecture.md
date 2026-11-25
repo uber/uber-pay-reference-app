@@ -2,7 +2,7 @@
 
 ## Contract first, native implementations
 
-`contracts/uberpay-openapi.json` is an unchanged capture of the v1.4 site, with its hash in `source.json`. `runtime.json` repairs a string-valued `required` and mislocated path-parameter `required` values, plus the accepted reference U1 choice to accept Account examples without undefined `name` and U4 optional CANCELLED lookup enum (ENABLE_CANCELLED_LOOKUP; default wire mapping is REJECTED). Default description validation retains type/maxLength256 but relaxes the example-conflicting pattern (STRICT_DESCRIPTION_PATTERN restores it); deprecated informational uri is string-only. `STRICT_ACCOUNT_NAME=true` restores that requirement. Token responses are validated using the request grant because the upstream `oneOf` response variants overlap. The independent Python validator checks every declared response body, int64 range and all callback request bodies; it never imports a gateway's validator.
+`contracts/uberpay-openapi.json` is an unchanged capture of the v1.4 site, with its hash in `contracts/source.json`. `contracts/runtime.json` repairs a string-valued `required` and mislocated path-parameter `required` values, accepts Account examples without the undefined `name` field, and includes an optional `CANCELLED` lookup enum. Lookup defaults to `REJECTED`; `ENABLE_CANCELLED_LOOKUP=true` enables the reference-only extension. Default description validation retains type/maxLength256 but relaxes the example-conflicting pattern (`STRICT_DESCRIPTION_PATTERN=true` restores it); deprecated informational `uri` fields are string-only. `STRICT_ACCOUNT_NAME=true` restores the account-name requirement. Token responses are validated using the request grant because the upstream `oneOf` response variants overlap. The independent Python validator checks every declared response body, int64 range and all callback request bodies; it never imports a gateway's validator.
 
 The three gateways implement their own HTTP/authentication/codec/services in native language code. They share SQL migrations and public fixtures, not a sidecar business-logic server. Each example uses an injectable PSP adapter seam and demo wallet provider. The complete local profile, including deliberately synthetic funding modes, is in `contracts/implementation-profile.json`.
 
@@ -44,26 +44,26 @@ Inbound Uber signatures cover raw request bytes, original path/query, Host, Date
 - Supported runtime is local-only; demo adapters, loopback/container-network endpoints, no production serving.
 - E5 int64 is preserved across decoding, persistence, response and callback serialization; overflow is rejected.
 - Single full/partial capture; release unused hold and preserve original authorized_e5. No multi-capture.
-- The conflicts have accepted reference choices in decisions.json. The unchanged upstream pin is evidence, and reference design acceptance is not external certification.
-- `DEMO_DEPOSIT` exercises confirm/cancel and reduced-amount update callbacks end to end. Ordinary charges still use chargeCallback; real funding-method routing is explicit configuration under accepted U11.
-- U15 supplies immutable journals, sealed per-source JSONL/manifest reports and atomic directory/strict local SFTP delivery outside SQL. The format is reference-specific, not a fabricated Uber production agreement. Retention, erasure, fraud and financial controls remain actual-deployment concerns.
+- Differences from the unchanged upstream pin are recorded in `contracts/errata.json`. Qualify compatibility with the actual Uber integration; local schema acceptance is not external certification.
+- `DEMO_DEPOSIT` exercises upstream-deprecated confirm/cancel and reduced-amount update callbacks. New integrations use `chargeCallback`; funding-method routing is explicit configuration.
+- The settlement utility supplies immutable journals, sealed per-source JSONL/manifest reports and atomic directory/strict local SFTP delivery outside SQL. The format is reference-specific, not an Uber production agreement. Retention, erasure, fraud and financial controls remain actual-deployment concerns.
 
-## Review-hardened local profile
+## Transaction and failure handling
 
 Transient DB/infrastructure errors are 500 even on routes lacking a declared 5xx; this is an explicitly provisional erratum, never a fake400 or stored retry result. Every pool uses a 1500ms lock timeout and 5000ms statement timeout. Java uses HikariCP. The default in-process demo uses that local lock. HTTP processing uses operation/resource/account locks only for short prepare/finalize transactions, never across HTTP; no production throughput SLO is claimed.
 
 Payouts reserve/debit the payer settlement account and credit the payee only on confirmation. Reconciliation metadata includes source_account_id, payee_account_id and order_id; raw customer/KYC/merchant-secret input is passed in memory in demo mode. The HTTP executor encrypts its recoverable command with AES-256-GCM; logs, normal transaction rows and the independent processor fixture do not store the raw command.
 
-WAITING actions have creation-time random capabilities, CSRF, configurable lifetime and single-use completion. User denial and expiry release holds and emit distinct USER_CANCELLED / MERCHANT_EXPIRED reasons. OAuth codes are single-use and reuse revokes their family; refresh tokens deliberately do not rotate under accepted U2. OAuth redirect URIs remain exact registered. Payment return URLs use separate scheme/authority/path registration while preserving query bytes, after approve or deny.
+WAITING actions have creation-time random capabilities, CSRF, configurable lifetime and single-use completion. User denial and expiry release holds and emit distinct USER_CANCELLED / MERCHANT_EXPIRED reasons. OAuth codes are single-use and reuse revokes their family; refresh tokens deliberately do not rotate in this reference. OAuth redirect URIs remain exact registered. Payment return URLs use separate scheme/authority/path registration while preserving query bytes, after approve or deny.
 
 Versioned callback sequences preserve per-transaction delivery order. A confirmed
 refund can be reversed once: recover unreserved funds, record remaining debt,
-protect unrelated holds, and repay debt from future credits/releases. This is the accepted reference accounting policy, not a claim of Uber-approved production collections behavior.
+protect unrelated holds, and repay debt from future credits/releases. This is a synthetic reference accounting policy, not Uber-approved production collections behavior.
 English/Portuguese pages and error descriptions, consent funding/country/locale
 context, configurable funding aliases and optional itemized balances are shared
 reference features in `contracts/reference-features.json`.
 
-See [review disposition](review-follow-up.md) for the full distinction between implemented regressions, implemented local policies and remaining real-integration/owner gates.
+See the [PSP integration guide](psp-integration.md) for processor, identity, configuration and external qualification requirements.
 
 ## Reference settlement boundary
 
@@ -77,12 +77,13 @@ receipt separately. Overlapping periods and conflicting immutable destinations
 fail closed. See `settlement.md` and `contracts/settlement-reference.schema.json`.
 
 
-## Completed maintenance and storage boundary
+## Maintenance and storage boundary
 
 Every fresh client namespace is bound to runtime, storage version2 and a stable
 instrument-key hash. Unknown populated legacy state and incompatible reuse fail
 startup. Public consent uses atomic per-client/per-peer PostgreSQL admission;
 it never acquires the money lock. Native workers run bounded expired-token/bucket
 cleanup and immutable seven-day hot operations/DONE-job archival once per minute.
-All replay reads include archives; unfinished work is retained. See operations.md
-and contracts/decisions.json O1–O7. No real-money migration or erasure policy is implied.
+All replay reads include archives; unfinished work is retained. See
+[operations](operations.md) for maintenance commands and runtime-isolation rules.
+No real-money migration or erasure policy is implied.

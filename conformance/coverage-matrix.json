@@ -1,0 +1,618 @@
+{
+  "version": 1,
+  "scope": "Pinned Uber Pay v1.4 local synthetic reference; executable contract and risk-based lifecycle coverage, not exhaustive combinations or certification",
+  "contract": "contracts/runtime.json",
+  "requirements": [
+    {
+      "id": "operation.GET./authorize",
+      "dimension": "operation",
+      "method": "GET",
+      "path": "/authorize",
+      "tests": [
+        "test_workflow_authorization_code_refresh_and_balance"
+      ]
+    },
+    {
+      "id": "operation.GET./find-transaction",
+      "dimension": "operation",
+      "method": "GET",
+      "path": "/find-transaction",
+      "tests": [
+        "test_workflow_legacy_deposit_confirmation",
+        "test_workflow_legacy_deposit_cancellation",
+        "test_workflow_legacy_deposit_reduced_amount_before_confirmation",
+        "test_workflow_automatic_charge_and_lookup",
+        "test_workflow_manual_authorize_capture",
+        "test_workflow_cancelled_lookup_returns_upstream_rejected"
+      ]
+    },
+    {
+      "id": "operation.POST./balance",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/balance",
+      "tests": [
+        "test_workflow_wallet_grant_refresh_and_balance",
+        "test_workflow_authorization_code_refresh_and_balance"
+      ]
+    },
+    {
+      "id": "operation.POST./charge",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/charge",
+      "tests": [
+        "test_workflow_legacy_deposit_confirmation",
+        "test_workflow_legacy_deposit_cancellation",
+        "test_workflow_legacy_deposit_reduced_amount_before_confirmation",
+        "test_workflow_fault_is_retryable_and_same_key_is_reprocessed",
+        "test_workflow_parallel_duplicate_replay_retains_exact_result",
+        "test_workflow_user_capability_survives_process_kill",
+        "test_workflow_refund_reversal_has_two_ordered_versions",
+        "test_workflow_automatic_charge_and_lookup",
+        "test_workflow_manual_authorize_capture",
+        "test_workflow_pending_charge_with_callback_retry",
+        "test_workflow_confirmed_charge_cancel_is_declared409",
+        "test_workflow_cancelled_lookup_returns_upstream_rejected"
+      ]
+    },
+    {
+      "id": "operation.POST./charge/{id}/cancel",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/charge/{id}/cancel",
+      "tests": [
+        "test_workflow_confirmed_charge_cancel_is_declared409",
+        "test_workflow_cancelled_lookup_returns_upstream_rejected"
+      ]
+    },
+    {
+      "id": "operation.POST./charge/{id}/capture",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/charge/{id}/capture",
+      "tests": [
+        "test_workflow_manual_authorize_capture"
+      ]
+    },
+    {
+      "id": "operation.POST./payout",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/payout",
+      "tests": [
+        "test_workflow_pending_payout_callback",
+        "test_workflow_payout_id_conflict_uses_declared409"
+      ]
+    },
+    {
+      "id": "operation.POST./refund",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/refund",
+      "tests": [
+        "test_workflow_refund_reversal_has_two_ordered_versions"
+      ]
+    },
+    {
+      "id": "operation.POST./token",
+      "dimension": "operation",
+      "method": "POST",
+      "path": "/token",
+      "tests": [
+        "test_workflow_wallet_grant_refresh_and_balance",
+        "test_workflow_authorization_code_refresh_and_balance"
+      ]
+    },
+    {
+      "id": "callback.cancelDeposit",
+      "dimension": "callback",
+      "subject": "cancelDeposit",
+      "tests": [
+        "test_workflow_legacy_deposit_cancellation",
+        "test_callback_cancelDeposit_http_200",
+        "test_callback_cancelDeposit_http_400",
+        "test_callback_cancelDeposit_http_403",
+        "test_callback_cancelDeposit_http_404",
+        "test_callback_cancelDeposit_http_409",
+        "test_callback_cancelDeposit_unavailable",
+        "test_callback_cancelDeposit_lost_response",
+        "test_callback_cancelDeposit_exhaustion",
+        "test_callback_cancelDeposit_retry_after_seconds",
+        "test_callback_cancelDeposit_retry_after_date"
+      ]
+    },
+    {
+      "id": "callback.chargeCallback",
+      "dimension": "callback",
+      "subject": "chargeCallback",
+      "tests": [
+        "test_workflow_user_capability_survives_process_kill",
+        "test_callback_chargeCallback_http_200",
+        "test_callback_chargeCallback_http_400",
+        "test_callback_chargeCallback_http_401",
+        "test_callback_chargeCallback_http_403",
+        "test_callback_chargeCallback_http_404",
+        "test_callback_chargeCallback_http_409",
+        "test_callback_chargeCallback_http_429",
+        "test_callback_chargeCallback_http_500",
+        "test_callback_chargeCallback_unavailable",
+        "test_callback_chargeCallback_lost_response",
+        "test_callback_chargeCallback_exhaustion",
+        "test_callback_chargeCallback_retry_after_seconds",
+        "test_callback_chargeCallback_retry_after_date"
+      ]
+    },
+    {
+      "id": "callback.confirmDeposit",
+      "dimension": "callback",
+      "subject": "confirmDeposit",
+      "tests": [
+        "test_workflow_legacy_deposit_confirmation",
+        "test_workflow_legacy_deposit_reduced_amount_before_confirmation",
+        "test_callback_confirmDeposit_http_200",
+        "test_callback_confirmDeposit_http_400",
+        "test_callback_confirmDeposit_http_403",
+        "test_callback_confirmDeposit_http_404",
+        "test_callback_confirmDeposit_http_409",
+        "test_callback_confirmDeposit_unavailable",
+        "test_callback_confirmDeposit_lost_response",
+        "test_callback_confirmDeposit_exhaustion",
+        "test_callback_confirmDeposit_retry_after_seconds",
+        "test_callback_confirmDeposit_retry_after_date"
+      ]
+    },
+    {
+      "id": "callback.payoutCallback",
+      "dimension": "callback",
+      "subject": "payoutCallback",
+      "tests": [
+        "test_workflow_pending_payout_callback",
+        "test_callback_payoutCallback_http_200",
+        "test_callback_payoutCallback_http_400",
+        "test_callback_payoutCallback_http_401",
+        "test_callback_payoutCallback_http_403",
+        "test_callback_payoutCallback_http_404",
+        "test_callback_payoutCallback_http_409",
+        "test_callback_payoutCallback_http_429",
+        "test_callback_payoutCallback_http_500",
+        "test_callback_payoutCallback_unavailable",
+        "test_callback_payoutCallback_lost_response",
+        "test_callback_payoutCallback_exhaustion",
+        "test_callback_payoutCallback_retry_after_seconds",
+        "test_callback_payoutCallback_retry_after_date"
+      ]
+    },
+    {
+      "id": "callback.updateDeposit",
+      "dimension": "callback",
+      "subject": "updateDeposit",
+      "tests": [
+        "test_workflow_legacy_deposit_reduced_amount_before_confirmation",
+        "test_callback_updateDeposit_http_200",
+        "test_callback_updateDeposit_http_400",
+        "test_callback_updateDeposit_http_403",
+        "test_callback_updateDeposit_http_404",
+        "test_callback_updateDeposit_http_409",
+        "test_callback_updateDeposit_unavailable",
+        "test_callback_updateDeposit_lost_response",
+        "test_callback_updateDeposit_exhaustion",
+        "test_callback_updateDeposit_retry_after_seconds",
+        "test_callback_updateDeposit_retry_after_date"
+      ]
+    },
+    {
+      "id": "callback.updateRefund",
+      "dimension": "callback",
+      "subject": "updateRefund",
+      "tests": [
+        "test_workflow_refund_reversal_has_two_ordered_versions",
+        "test_callback_updateRefund_http_200",
+        "test_callback_updateRefund_http_400",
+        "test_callback_updateRefund_http_401",
+        "test_callback_updateRefund_http_403",
+        "test_callback_updateRefund_http_404",
+        "test_callback_updateRefund_http_409",
+        "test_callback_updateRefund_http_429",
+        "test_callback_updateRefund_http_500",
+        "test_callback_updateRefund_unavailable",
+        "test_callback_updateRefund_lost_response",
+        "test_callback_updateRefund_exhaustion",
+        "test_callback_updateRefund_retry_after_seconds",
+        "test_callback_updateRefund_retry_after_date"
+      ]
+    },
+    {
+      "id": "workflow.authorization_code_refresh_and_balance",
+      "dimension": "workflow",
+      "subject": "authorization_code_refresh_and_balance",
+      "tests": [
+        "test_workflow_authorization_code_refresh_and_balance"
+      ]
+    },
+    {
+      "id": "workflow.automatic_charge_and_lookup",
+      "dimension": "workflow",
+      "subject": "automatic_charge_and_lookup",
+      "tests": [
+        "test_workflow_automatic_charge_and_lookup"
+      ]
+    },
+    {
+      "id": "workflow.cancelled_lookup_returns_upstream_rejected",
+      "dimension": "workflow",
+      "subject": "cancelled_lookup_returns_upstream_rejected",
+      "tests": [
+        "test_workflow_cancelled_lookup_returns_upstream_rejected"
+      ]
+    },
+    {
+      "id": "workflow.confirmed_charge_cancel_is_declared409",
+      "dimension": "workflow",
+      "subject": "confirmed_charge_cancel_is_declared409",
+      "tests": [
+        "test_workflow_confirmed_charge_cancel_is_declared409"
+      ]
+    },
+    {
+      "id": "workflow.fault_is_retryable_and_same_key_is_reprocessed",
+      "dimension": "workflow",
+      "subject": "fault_is_retryable_and_same_key_is_reprocessed",
+      "tests": [
+        "test_workflow_fault_is_retryable_and_same_key_is_reprocessed"
+      ]
+    },
+    {
+      "id": "workflow.legacy_deposit_cancellation",
+      "dimension": "workflow",
+      "subject": "legacy_deposit_cancellation",
+      "tests": [
+        "test_workflow_legacy_deposit_cancellation"
+      ]
+    },
+    {
+      "id": "workflow.legacy_deposit_confirmation",
+      "dimension": "workflow",
+      "subject": "legacy_deposit_confirmation",
+      "tests": [
+        "test_workflow_legacy_deposit_confirmation"
+      ]
+    },
+    {
+      "id": "workflow.legacy_deposit_reduced_amount_before_confirmation",
+      "dimension": "workflow",
+      "subject": "legacy_deposit_reduced_amount_before_confirmation",
+      "tests": [
+        "test_workflow_legacy_deposit_reduced_amount_before_confirmation"
+      ]
+    },
+    {
+      "id": "workflow.manual_authorize_capture",
+      "dimension": "workflow",
+      "subject": "manual_authorize_capture",
+      "tests": [
+        "test_workflow_manual_authorize_capture"
+      ]
+    },
+    {
+      "id": "workflow.parallel_duplicate_replay_retains_exact_result",
+      "dimension": "workflow",
+      "subject": "parallel_duplicate_replay_retains_exact_result",
+      "tests": [
+        "test_workflow_parallel_duplicate_replay_retains_exact_result"
+      ]
+    },
+    {
+      "id": "workflow.payout_id_conflict_uses_declared409",
+      "dimension": "workflow",
+      "subject": "payout_id_conflict_uses_declared409",
+      "tests": [
+        "test_workflow_payout_id_conflict_uses_declared409"
+      ]
+    },
+    {
+      "id": "workflow.pending_charge_with_callback_retry",
+      "dimension": "workflow",
+      "subject": "pending_charge_with_callback_retry",
+      "tests": [
+        "test_workflow_pending_charge_with_callback_retry"
+      ]
+    },
+    {
+      "id": "workflow.pending_payout_callback",
+      "dimension": "workflow",
+      "subject": "pending_payout_callback",
+      "tests": [
+        "test_workflow_pending_payout_callback"
+      ]
+    },
+    {
+      "id": "workflow.refund_reversal_has_two_ordered_versions",
+      "dimension": "workflow",
+      "subject": "refund_reversal_has_two_ordered_versions",
+      "tests": [
+        "test_workflow_refund_reversal_has_two_ordered_versions"
+      ]
+    },
+    {
+      "id": "workflow.user_capability_survives_process_kill",
+      "dimension": "workflow",
+      "subject": "user_capability_survives_process_kill",
+      "tests": [
+        "test_workflow_user_capability_survives_process_kill"
+      ]
+    },
+    {
+      "id": "workflow.wallet_grant_refresh_and_balance",
+      "dimension": "workflow",
+      "subject": "wallet_grant_refresh_and_balance",
+      "tests": [
+        "test_workflow_wallet_grant_refresh_and_balance"
+      ]
+    },
+    {
+      "id": "validation.authorize",
+      "dimension": "validation",
+      "subject": "authorize",
+      "tests": [
+        "test_validation_authorize_parameters"
+      ]
+    },
+    {
+      "id": "validation.balance",
+      "dimension": "validation",
+      "subject": "balance",
+      "tests": [
+        "test_validation_balance"
+      ]
+    },
+    {
+      "id": "validation.cancel",
+      "dimension": "validation",
+      "subject": "cancel",
+      "tests": [
+        "test_validation_cancel"
+      ]
+    },
+    {
+      "id": "validation.capture",
+      "dimension": "validation",
+      "subject": "capture",
+      "tests": [
+        "test_validation_capture"
+      ]
+    },
+    {
+      "id": "validation.charge",
+      "dimension": "validation",
+      "subject": "charge",
+      "tests": [
+        "test_validation_charge"
+      ]
+    },
+    {
+      "id": "validation.charge_access_token",
+      "dimension": "validation",
+      "subject": "charge_access_token",
+      "tests": [
+        "test_validation_charge_access_token"
+      ]
+    },
+    {
+      "id": "validation.lookup",
+      "dimension": "validation",
+      "subject": "lookup",
+      "tests": [
+        "test_validation_lookup_parameters"
+      ]
+    },
+    {
+      "id": "validation.payout",
+      "dimension": "validation",
+      "subject": "payout",
+      "tests": [
+        "test_validation_payout"
+      ]
+    },
+    {
+      "id": "validation.refund",
+      "dimension": "validation",
+      "subject": "refund",
+      "tests": [
+        "test_validation_refund"
+      ]
+    },
+    {
+      "id": "validation.token_code",
+      "dimension": "validation",
+      "subject": "token_code",
+      "tests": [
+        "test_validation_token_code"
+      ]
+    },
+    {
+      "id": "validation.token_refresh",
+      "dimension": "validation",
+      "subject": "token_refresh",
+      "tests": [
+        "test_validation_token_refresh"
+      ]
+    },
+    {
+      "id": "validation.token_wallet",
+      "dimension": "validation",
+      "subject": "token_wallet",
+      "tests": [
+        "test_validation_token_wallet"
+      ]
+    },
+    {
+      "id": "behavior.charge_sync_and_pending",
+      "dimension": "behavior",
+      "subject": "charge_sync_and_pending",
+      "tests": [
+        "test_sync_charge_lookup",
+        "test_charge_rejected",
+        "test_charge_pending_callback",
+        "test_charge_pending_rejected_callback"
+      ]
+    },
+    {
+      "id": "behavior.capture_cancel_expiry",
+      "dimension": "behavior",
+      "subject": "capture_cancel_expiry",
+      "tests": [
+        "test_manual_capture",
+        "test_manual_cancel",
+        "test_expired_authorization",
+        "test_capture_cancel_race",
+        "test_owner_partial_capture_http_releases_remainder_and_limits_refunds"
+      ]
+    },
+    {
+      "id": "behavior.refund_limits_and_reversal",
+      "dimension": "behavior",
+      "subject": "refund_limits_and_reversal",
+      "tests": [
+        "test_refund_partial_and_over_refund",
+        "test_review_concurrent_refunds_never_exceed_original",
+        "test_complete_refund_pending_rejection_and_reversal",
+        "test_complete_refund_reversal_debt_preserves_other_holds"
+      ]
+    },
+    {
+      "id": "behavior.payout_ledger_and_ownership",
+      "dimension": "behavior",
+      "subject": "payout_ledger_and_ownership",
+      "tests": [
+        "test_review_payout_declared_conflicts_declines_and_ledger",
+        "test_consolidated_m7_bidirectional_payouts_use_consistent_account_order"
+      ]
+    },
+    {
+      "id": "behavior.wallet_grants_and_scopes",
+      "dimension": "behavior",
+      "subject": "wallet_grants_and_scopes",
+      "tests": [
+        "test_authorize_code_exchange_single_use",
+        "test_review_refresh_reusable_no_undeclared_rotation",
+        "test_balance_wrong_scope",
+        "test_access_authorization_binds_account"
+      ]
+    },
+    {
+      "id": "behavior.action_capabilities",
+      "dimension": "behavior",
+      "subject": "action_capabilities",
+      "tests": [
+        "test_review_real_actions_approve_deny_reuse",
+        "test_review_forged_action_does_not_change_payment",
+        "test_review_action_expiry_releases_hold_and_notifies"
+      ]
+    },
+    {
+      "id": "behavior.idempotency_and_races",
+      "dimension": "behavior",
+      "subject": "idempotency_and_races",
+      "tests": [
+        "test_idempotency_replays_response",
+        "test_conflicting_idempotency",
+        "test_concurrent_duplicate_has_one_effect",
+        "test_consolidated_r5_concurrent_key_conflict_has_one_provider_effect"
+      ]
+    },
+    {
+      "id": "behavior.all_callback_reason_enums",
+      "dimension": "behavior",
+      "subject": "all_callback_reason_enums",
+      "tests": [
+        "test_complete_charge_reason_enum_sync_and_async",
+        "test_complete_payout_reason_enum"
+      ]
+    },
+    {
+      "id": "behavior.money_and_description_boundaries",
+      "dimension": "behavior",
+      "subject": "money_and_description_boundaries",
+      "tests": [
+        "test_exact_e5_above_safe_integer",
+        "test_validation_positive_boundaries"
+      ]
+    },
+    {
+      "id": "behavior.raw_signatures_and_key_rotation",
+      "dimension": "behavior",
+      "subject": "raw_signatures_and_key_rotation",
+      "tests": [
+        "test_tampered_digest",
+        "test_signature_wrong_target",
+        "test_signature_expired",
+        "test_consolidated_s8_signing_key_overlap"
+      ]
+    },
+    {
+      "id": "behavior.processor_crash_and_unknown_outcomes",
+      "dimension": "behavior",
+      "subject": "processor_crash_and_unknown_outcomes",
+      "tests": [
+        "test_complete_processor_prepare_crash_before_dispatch",
+        "test_complete_processor_commit_then_gateway_crash_recovers",
+        "test_complete_processor_lost_response_reconciles_without_frozen_5xx",
+        "test_owner2_crashes_have_exactly_one_ledger_effect"
+      ]
+    },
+    {
+      "id": "behavior.callback_ordering_and_recovery",
+      "dimension": "behavior",
+      "subject": "callback_ordering_and_recovery",
+      "tests": [
+        "test_complete_callback_ack_crash_and_multiworker_fencing",
+        "test_consolidated_r1_blocked_chain_operator_redrive"
+      ]
+    },
+    {
+      "id": "behavior.optional_fields_through_processor",
+      "dimension": "behavior",
+      "subject": "optional_fields_through_processor",
+      "tests": [
+        "test_optional_processor_fields_are_preserved"
+      ]
+    },
+    {
+      "id": "behavior.localization_and_funding_aliases",
+      "dimension": "behavior",
+      "subject": "localization_and_funding_aliases",
+      "tests": [
+        "test_complete_localized_action_and_consent",
+        "test_complete_itemized_balance",
+        "test_complete_funding_alias_country_currency_and_wallet_grant"
+      ]
+    },
+    {
+      "id": "behavior.retention_runtime_and_consent_limits",
+      "dimension": "behavior",
+      "subject": "retention_runtime_and_consent_limits",
+      "tests": [
+        "test_owner2_archive_preserves_replay_and_unresolved_work",
+        "test_owner2_runtime_guard_and_stable_instrument_rotation",
+        "test_owner2_authorize_server_error_and_bounded_abuse"
+      ]
+    },
+    {
+      "id": "behavior.settlement_lifecycle_and_delivery",
+      "dimension": "behavior",
+      "subject": "settlement_lifecycle_and_delivery",
+      "tests": [
+        "test_owner_settlement_journal_seal_and_real_sftp_delivery",
+        "test_owner2_settlement_lifecycles_and_concurrent_seals",
+        "test_owner2_settlement_closing_barrier_uses_commit_clock"
+      ]
+    }
+  ],
+  "exclusions": [
+    "Real PSP/bank execution, real-money effects and Uber sandbox/production certification.",
+    "Real identity/KYC/SCA, national-document check digits and bilateral settlement acceptance.",
+    "Every possible country/currency combination, arbitrary field permutations, fuzzing and production load/availability SLOs.",
+    "All response-field permutations and deprecated optional callback metadata combinations; payload schemas and named lifecycle assertions remain enforced."
+  ]
+}

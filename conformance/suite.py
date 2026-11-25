@@ -15,6 +15,9 @@ from .completion_suite import CompletionSuite
 from .owner_suite import OwnerSuite
 from .consolidated_suite import ConsolidatedSuite
 from .final_owner_suite import FinalOwnerSuite
+from .callback_suite import CallbackCoverageSuite, install_callbacks
+from .input_suite import InputCoverageSuite, install_inputs
+from .scenario import Scenario, bundles, load
 from . import contract
 from .wire import eventually
 
@@ -34,6 +37,8 @@ class HiddenForm(HTMLParser):
 
 
 class GatewaySuite(
+    CallbackCoverageSuite,
+    InputCoverageSuite,
     FinalOwnerSuite,
     ConsolidatedSuite,
     OwnerSuite,
@@ -714,14 +719,6 @@ class GatewaySuite(
         self.assertEqual(self.submit_action(self.action_page(response)).status, 302)
         self.accepted("chargeCallback", data["id"])
 
-    def test_shared_scenario_manifests(self):
-        from .scenario import Scenario, load
-
-        for file in ["scenarios.json", "recovery-scenarios.json"]:
-            for scenario in load(contract.ROOT / "conformance/fixtures" / file):
-                with self.subTest(scenario=scenario["name"]):
-                    Scenario(self).run(scenario)
-
     def test_test_controls_require_secret(self):
         response = self.client.request(
             "GET", "/_test/state", signed=False, outside=True
@@ -753,3 +750,20 @@ for _case in json.loads(
     (contract.ROOT / "conformance/fixtures/invalid-charge.json").read_text()
 ):
     setattr(GatewaySuite, "test_invalid_" + _case["name"], invalid_test(_case))
+
+
+def workflow_test(scenario):
+    def test(self):
+        Scenario(self).run(scenario)
+
+    return test
+
+
+for _bundle in bundles():
+    for _scenario in load(_bundle):
+        setattr(
+            GatewaySuite, "test_workflow_" + _scenario["name"], workflow_test(_scenario)
+        )
+
+install_callbacks(GatewaySuite)
+install_inputs(GatewaySuite)

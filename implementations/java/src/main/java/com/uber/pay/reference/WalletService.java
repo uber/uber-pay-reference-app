@@ -39,6 +39,8 @@ final class WalletService {
   }
 
   String scopes(String v) {
+    if (v == null || v.isBlank())
+      throw new ApiError(400, "invalid_scope", "Invalid scope");
     Set<String> s = new TreeSet<>(Arrays.asList(v.split(" ")));
     if (s.isEmpty() || !SCOPES.containsAll(s))
       throw new ApiError(400, "invalid_scope", "Invalid scope");
@@ -78,6 +80,7 @@ final class WalletService {
 
   Reply authorize(Map<String, String> q, String address) {
     if (!config.client.equals(q.get("client_id"))
+        || q.get("redirect_uri") == null
         || !config.redirects.contains(q.get("redirect_uri")))
       throw new ApiError(400, "invalid_request", "Unregistered authorization request");
     try {
@@ -124,7 +127,6 @@ final class WalletService {
             "client_id",
             "response_type",
             "redirect_uri",
-            "scope",
             "state",
             "authorization_details"))
       if (q.getOrDefault(k, "").isBlank())

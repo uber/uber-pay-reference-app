@@ -60,6 +60,7 @@ class Client:
         self.prefix = self.base.path.rstrip("/")
         self.key, self.key_id, self.control_secret = key, key_id, control_secret
         self.observed = set()
+        self.validation_observed = set()
 
     def request(
         self,
@@ -72,6 +73,7 @@ class Client:
         signed=True,
         raw=None,
         headers=None,
+        omit_headers=(),
         date=None,
         signature_target=None,
         signature_parameters=None,
@@ -112,6 +114,8 @@ class Client:
         if token:
             values["Authorization"] = "Bearer " + token
         values.update(headers or {})
+        for name in omit_headers:
+            values.pop(name, None)
         connection_type = (
             http.client.HTTPSConnection
             if self.base.scheme == "https"

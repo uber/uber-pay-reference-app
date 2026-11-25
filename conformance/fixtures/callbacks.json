@@ -1,0 +1,32 @@
+{
+  "chargeCallback": {
+    "state": {
+      "value": "CONFIRMED"
+    },
+    "psp_reference": "synthetic-callback-ref"
+  },
+  "payoutCallback": {
+    "state": {
+      "value": "CONFIRMED"
+    },
+    "psp_reference": "synthetic-callback-ref"
+  },
+  "updateRefund": {
+    "status": "CONFIRMED",
+    "merchant_reference": "synthetic-refund-ref"
+  },
+  "confirmDeposit": {
+    "merchant_reference": "synthetic-deposit-ref"
+  },
+  "cancelDeposit": {
+    "merchant_reference": "synthetic-deposit-ref",
+    "cancel_reason": "USER_CANCELLED"
+  },
+  "updateDeposit": {
+    "merchant_reference": "synthetic-deposit-ref",
+    "amount": {
+      "value": 500000,
+      "currency": "BRL"
+    }
+  }
+}

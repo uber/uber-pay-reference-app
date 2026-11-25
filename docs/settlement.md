@@ -1,9 +1,9 @@
-# Reference settlement/reconciliation workflow (U15)
+# Reference settlement/reconciliation workflow
 
-This is a complete **local synthetic reconciliation workflow**, not a claim that
-Uber's production settlement files use this format. Its design is accepted for
-the reference app. Counterparty schema/host/credential mapping is deployment input,
-not a missing implementation or an invented commercial agreement.
+This **local synthetic reconciliation workflow** demonstrates immutable report
+generation and delivery. It is not Uber's production settlement file format.
+A real integration must map the agreed counterparty schema, host, credentials
+and financial acceptance process.
 
 ## Journal and accounting direction
 
@@ -114,9 +114,9 @@ its actual counterparty format and commercial financial acceptance workflow.
 These are not granted by an engineering decision to ship this reference format.
 
 
-## Review clarifications (November 24)
+## Reporting windows and export controls
 
-The shared-producer/exclusive-closer lock is now only a **short barrier**, not held
+The shared-producer/exclusive-closer lock is a **short barrier**, not held
 while rendering/sealing files. An exporter-only transaction lock serializes seals.
 Because period_end is already in the past, new producers timestamp after the
 barrier; the immutable pre-boundary journal can be read without blocking today's

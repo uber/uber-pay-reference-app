@@ -9,11 +9,16 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from psycopg import sql
 
 from . import contract
+
+
+def bundles():
+    """Only executable workflow bundles, not payloads or the coverage matrix."""
+    return sorted((contract.ROOT / "conformance/fixtures").glob("*scenarios.json"))
 
 
 def field(value, path):
@@ -126,10 +131,29 @@ class Scenario:
             self.bindings[name] = field(reply.body, path)
         for name, path in step.get("bind_headers", {}).items():
             self.bindings[name] = reply.headers[path.lower()]
+        if "bind_redirect" in step:
+            redirect = urlsplit(reply.headers["location"])
+            values = parse_qs(redirect.query, keep_blank_values=True)
+            for name, parameter in step["bind_redirect"].items():
+                if len(values.get(parameter, [])) != 1:
+                    raise AssertionError(
+                        f"Expected one redirect parameter: {parameter}"
+                    )
+                self.bindings[name] = values[parameter][0]
+        if "redirect" in expected:
+            actual = urlsplit(reply.headers["location"])
+            registered = urlsplit(expected["redirect"]["uri"])
+            self.suite.assertEqual(
+                (actual.scheme, actual.netloc, actual.path),
+                (registered.scheme, registered.netloc, registered.path),
+            )
+            parameters = parse_qs(actual.query, keep_blank_values=True)
+            for name, value in expected["redirect"].get("query", {}).items():
+                self.suite.assertEqual(parameters.get(name), [value])
         if step.get("save"):
             self.bindings[step["save"]] = dict(
                 status=reply.status,
-                body=reply.body,
+                body=None if step.get("browser") else reply.body,
                 raw=reply.raw.decode(),
                 headers=reply.headers,
             )
@@ -196,15 +220,21 @@ class Scenario:
             u = urlsplit(target)
             if u.netloc and u.netloc != self.suite.client.base.netloc:
                 raise ValueError("Forms must target the current local gateway")
-            page = self.suite.client.request(
-                "GET",
-                u.path + ("?" + u.query if u.query else ""),
-                signed=False,
-                outside=True,
-            )
-            self.suite.assertEqual(page.status, 200)
+            if step.get("page"):
+                page = field(self.bindings, step["page"])
+                page_status, page_text = page["status"], page["raw"]
+            else:
+                page = self.suite.client.request(
+                    "GET",
+                    u.path + ("?" + u.query if u.query else ""),
+                    signed=False,
+                    outside=True,
+                )
+                page_status, page_text = page.status, page.raw.decode()
+            self.suite.assertEqual(page_status, 200)
             form = HiddenForm()
-            form.feed(page.raw.decode())
+            form.feed(page_text)
+            self.suite.assertTrue(form.fields, "Expected a capability/CSRF-bound form")
             self.bindings[step["save"]] = {"action": form.action, "fields": form.fields}
         elif op == "form_submit":
             form = field(self.bindings, step["form"])
@@ -226,18 +256,30 @@ class Scenario:
                 if "fixture" in step
                 else expand(step.get("payload"), self.bindings)
             )
+            payload = expand(payload, self.bindings)
             for path, value in expand(step.get("set", {}), self.bindings).items():
                 assign(payload, path, value)
             args = expand(step.get("request", {}), self.bindings)
             if step["method"] == "POST" and "idem" not in args:
                 args["idem"] = self.suite.uid()
-            reply = self.suite.client.request(
-                step["method"], expand(step["path"], self.bindings), payload, **args
-            )
+            target = expand(step["path"], self.bindings)
+            if "query" in step:
+                query = expand(step["query"], self.bindings)
+                query = {
+                    key: json.dumps(value, separators=(",", ":"))
+                    if isinstance(value, (dict, list))
+                    else value
+                    for key, value in query.items()
+                }
+                target += ("&" if "?" in target else "?") + urlencode(query)
+            reply = self.suite.client.request(step["method"], target, payload, **args)
             # Schema validation defaults to the declared request template.
             if "contract_path" not in step and not args.get("outside"):
                 template = step["path"].split("?", 1)[0]
                 step = dict(step, contract_path=template)
+            # Browser HTML is not a JSON API response. Assert it explicitly.
+            if step.get("browser"):
+                step = dict(step, contract_path=None)
             self.assertions(reply, step)
         else:
             raise ValueError(f"Unknown scenario operation: {op}")

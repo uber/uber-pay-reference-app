@@ -69,7 +69,7 @@ Manual bounded maintenance, with no test-control dependency:
 .venv/bin/python -m tools.operations --client demo-client --maintain --batch-size 200
 ```
 
-Public consent creation no longer takes the monetary per-client advisory lock,
+Public consent creation does not take the monetary per-client advisory lock,
 and is bounded by shared PostgreSQL counters:200/client/minute and60/actual peer
 IP/minute by default. Excess gets429 with Retry-After60 before consent storage.
 Old bucket rows expire. Signed money requests are not charged against this

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .contract import ROOT
 from .coverage import report as coverage_report
+from .coverage import integrity as coverage_integrity, qualification
 from .mock_uber import MockUber
 from .suite import GatewaySuite
 from .wire import Client, eventually, keys
@@ -239,6 +240,7 @@ def main():
         help="Run matching scenario names while developing; not a full release gate",
     )
     args = parser.parse_args()
+    coverage_integrity({name for name in dir(GatewaySuite) if name.startswith("test_")})
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     private = keys(ROOT / ".local")
@@ -303,15 +305,22 @@ def main():
             result = runner.run(tests)
             summary = write_report(output, language, result, mock.events)
             summary["response_coverage"] = coverage_report(client.observed)
+            summary["coverage"] = qualification(
+                client.observed,
+                mock.events,
+                result.cases,
+                full_run=not args.match,
+                validation_observed=client.validation_observed,
+            )
             (output / f"{language}.coverage.json").write_text(
-                json.dumps(summary["response_coverage"], indent=2)
+                json.dumps(summary["coverage"], indent=2)
             )
             (output / f"{language}.json").write_text(json.dumps(summary, indent=2))
             summaries.append(summary)
-            if not args.match and summary["response_coverage"]["missing"]:
+            if not args.match and not summary["coverage"]["qualified"]:
                 success = False
                 print(
-                    f"{language}: missing declared status coverage: {summary['response_coverage']['missing']}",
+                    f"{language}: coverage qualification failed; inspect {output / (language + '.coverage.json')}",
                     file=sys.stderr,
                 )
             success &= (

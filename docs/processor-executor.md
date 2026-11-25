@@ -85,7 +85,7 @@ change. Inbound signing keys support configured overlap. Processor encryption-ke
   an Uber-approved production collections policy.
 - `DEMO_DEPOSIT` is an opt-in **legacy upstream-deprecated callback** flow: confirmation/cancellation callbacks,
   with an optional **reduced** amount update delivered before confirmation. Modern
-  ordinary charges still use chargeCallback. Assigned funding profiles explicitly select callback_mode under accepted U11.
+  ordinary charges still use chargeCallback. Assigned funding profiles explicitly select callback_mode.
 - Balance uses the reference wallet ledger, not a remote production balance source.
   Resource-owner login, KYC, real routing and conversion rules remain PSP supplied.
 - Commands may include sensitive operation input, so they are encrypted at rest in
@@ -109,7 +109,7 @@ These tests establish the reference boundary, not exactly-once effects in an
 arbitrary real processor. An adopter must supply durable downstream idempotency
 and authoritative lookup, or keep uncertain outcomes quarantined.
 
-### Accepted lifecycle additions
+## Capture and deposit lifecycle
 
 A manual charge permits one positive full/partial capture up to the original
 authorization; successful capture releases the unused hold and closes the

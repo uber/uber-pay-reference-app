@@ -43,12 +43,19 @@ The test runner builds this executable, creates an isolated client namespace, ge
 
 The sample ledger's debit/reserve/refund effects and idempotent response are committed in one PostgreSQL transaction under a per-client advisory lock. The local PSP adapter makes deterministic decisions using that synthetic state. **Do not implement a remote processor by inserting an HTTP call into these locked adapter methods.** A real processor integration needs a durable dispatch intent, provider idempotency key, timeout/unknown-outcome reconciliation, a trusted identity provider, and an independent deployment/security review before a nonlocal serving profile can be enabled. `LocalOnly()` guards make that limitation explicit.
 
-`PspAdapter` exposes charge, capture, cancel, refund, payout, balance, and operation lookup. `WalletProvider` isolates the fake consent identity and reference exchange. Internal pending/authorized states are mapped to the pinned wire contract; partial capture and CANCELLED lookup follow the accepted reference choices in contracts/decisions.json.
+`PspAdapter` exposes charge, capture, cancel, refund, payout, balance, and operation lookup. `WalletProvider` isolates the fake consent identity and reference exchange. Internal pending/authorized states are mapped to the pinned wire contract. See [API compatibility](../../docs/psp-integration.md#3-configure-api-compatibility-and-onboarding) for partial capture and the opt-in `CANCELLED` lookup extension.
 
-The callback worker performs network I/O outside database transactions. Callback 409 is recorded as `RECONCILE`, permanent errors/retry exhaustion as `FAILED`, and only 2xx as `DONE`. A stable callback identity is reused where the callback supports an idempotency header. Refresh tokens are reusable without rotation in the accepted reference-policy local profile; authorization-code reuse revokes the issued token family.
+The callback worker performs network I/O outside database transactions. Callback 409 is recorded as `RECONCILE`, permanent errors/retry exhaustion as `FAILED`, and only 2xx as `DONE`. A stable callback identity is reused where the callback supports an idempotency header. Refresh tokens are reusable without rotation in the local reference; authorization-code reuse revokes the issued token family.
 
-## Review-hardened local policies
+## Runtime defaults and integration guides
 
-`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. The native `ProcessorExecutor` is the separate HTTP boundary: see `docs/processor-executor.md` for encrypted intents, reservations, out-of-transaction dispatch, fenced finalization and provider-key recovery. It is runnable against the independent local fixture; nonlocal modes remain forbidden. Shared feature profiles include reversal/debt, deposit amount ordering, all reason triggers, funding aliases and bilingual consent/errors. See `docs/review-follow-up.md` for accepted reference decisions and real-integration prerequisites.
+`ACTION_TTL_MS` defaults to 600000 and `REFRESH_TOKEN_TTL_SECONDS` to 2592000.
+Unexpected failures return HTTP 500; callback HTTP 401 evicts the cached token
+and retries. For configuration, supported behavior and adopter responsibilities,
+read the [PSP integration guide](../../docs/psp-integration.md).
 
-Accepted U1–U15 choices, rationale and test evidence are in `contracts/decisions.json`. The standalone reference settlement utility and local SFTP workflow are documented in `docs/settlement.md`; they are not a gateway runtime sidecar or a production settlement agreement.
+The [processor executor](../../docs/processor-executor.md) documents the native
+HTTP boundary. [Operations](../../docs/operations.md) covers blocked work and
+safe re-drive. The [settlement guide](../../docs/settlement.md) covers the
+standalone reconciliation utility and local SFTP workflow; neither is a gateway
+sidecar or a production settlement agreement.

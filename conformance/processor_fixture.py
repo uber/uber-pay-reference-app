@@ -79,9 +79,10 @@ class ProcessorFixture:
                     resource=resource,
                     result=json.loads(result),
                     effects=n,
+                    command_hash=digest,
                 )
-                for k, op, resource, result, n in db.execute(
-                    "SELECT key,operation,resource,decision,effects FROM operations WHERE client=?",
+                for k, op, resource, result, n, digest in db.execute(
+                    "SELECT key,operation,resource,decision,effects,command_hash FROM operations WHERE client=?",
                     (client,),
                 )
             ]

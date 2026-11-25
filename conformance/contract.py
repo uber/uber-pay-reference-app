@@ -36,6 +36,14 @@ def check_int64(schema, value):
     for key in ("allOf",):
         for child in schema.get(key, []):
             check_int64(child, value)
+    for key in ("oneOf", "anyOf"):
+        for child in schema.get(key, []):
+            document = copy.deepcopy(child)
+            document["components"] = SPEC["components"]
+            if Draft202012Validator(document, format_checker=FormatChecker()).is_valid(
+                value
+            ):
+                check_int64(child, value)
     if isinstance(value, dict):
         for key, child in schema.get("properties", {}).items():
             if key in value:

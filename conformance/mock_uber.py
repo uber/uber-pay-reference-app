@@ -1,6 +1,7 @@
 """Local-only Uber callback receiver with independent contract/auth checks and faults."""
 
 import argparse
+import hashlib
 import json
 import re
 import secrets
@@ -178,6 +179,11 @@ class MockUber:
                             "scope": scope,
                             "error": error,
                             "idempotency_key": self.headers.get("X-Idempotency-Key"),
+                            "token_fingerprint": hashlib.sha256(
+                                supplied.encode()
+                            ).hexdigest()
+                            if scope
+                            else None,
                         }
                     )
                 with mock.lock:
@@ -189,8 +195,17 @@ class MockUber:
                 if barrier:
                     barrier.entered.set()
                     barrier.release.wait(timeout=12)
+                if status == 0:
+                    # An injected lost response is a transport failure, never HTTP 0.
+                    self.close_connection = True
+                    self.connection.close()
+                    return
                 self.reply(
                     status,
+                    {"deposit": {"id": transaction_id}}
+                    if status == 200
+                    and name in ("confirmDeposit", "cancelDeposit", "updateDeposit")
+                    else None,
                     retry_after=mock.retry_after.get((name, transaction_id))
                     if status in (429, 503)
                     else None,

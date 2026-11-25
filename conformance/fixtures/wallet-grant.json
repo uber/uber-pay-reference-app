@@ -1,0 +1,12 @@
+{
+  "client_id": "${client_id}",
+  "client_secret": "${client_secret}",
+  "grant_type": "urn:uberpay:params:oauth:grant-type:wallet-grant",
+  "scope": "charge refund get_balance offline_access",
+  "funding_method": "DEMO_SYNC",
+  "country_iso2": "BR",
+  "wallet_reference_data": {
+    "payment_identifier": "demo-account",
+    "display_name": "Synthetic wallet"
+  }
+}

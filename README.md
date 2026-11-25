@@ -9,13 +9,13 @@ A self-contained **PSP-hosted** integration reference for Uber Pay API **v1.4**,
 Install Docker Engine with Compose v2, Git and Make. No Uber credentials are required.
 
 ```sh
-git clone https://github.com/Arka-Uber-Open/uber-pay-reference-app.git
+git clone https://github.com/uber/uber-pay-reference-app.git
 cd uber-pay-reference-app
 make up LANGUAGE=node       # alternatives: java or go
 make demo LANGUAGE=node
 ```
 
-Compose builds the selected native gateway, PostgreSQL, a key-generation job and a fake Uber callback/OAuth service. The demo sends a correctly signed synthetic charge and looks it up. The gateway is at `http://127.0.0.1:8080/uberpay/v1`; readiness is `GET http://127.0.0.1:8080/health`. Do not enable two language profiles on port 8080 simultaneously.
+Compose builds the selected native gateway, PostgreSQL, a key-generation job and a fake Uber callback/OAuth service. The demo sends a correctly signed synthetic charge and looks it up. The gateway is at `http://127.0.0.1:8080/uberpay/v1`; readiness is `GET http://127.0.0.1:8080/health`. Do not enable two language profiles on port 8080 simultaneously. Each client namespace is bound to its originating language; use a fresh Compose project/database namespace when trying another implementation.
 
 ```sh
 make down                  # stop containers; keep the disposable DB/key volumes
@@ -40,7 +40,11 @@ make contract                      # source hash, schema syntax and reference ch
 
 Use a different native database with `make conformance LANGUAGE=all DATABASE_URL=postgresql://uberpay:uberpay@127.0.0.1:5432/uberpay`. Local DB hosts are restricted; each test run uses a new synthetic client namespace. A PostgreSQL installation can also be managed with `tools/local_db.py` on port 55432; it does not register a background OS service.
 
-The harness launches native processes, signs the exact request bytes, validates responses **independently** against the contract, receives all six callback types, injects failures, tests concurrent requests, and restarts gateways. No language proxies its implementation through another. Required cases are not silently skipped. JSON and JUnit reports plus redacted server logs are written under `.artifacts/conformance/` (ignored by Git). Ten versioned [JSON workflows](docs/scenario-format.md) include typed bindings, concurrency, SQL faults, forms and process restart; independent Python probes cover processor barriers and multi-worker lease faults. All run against every language. JSON fixtures live in `conformance/fixtures/`; `--match` is available for debugging but is not a release qualification run.
+The harness launches native processes, signs the exact request bytes, validates responses **independently** against the contract, receives all six callback types, injects failures, tests concurrent requests, and restarts gateways. No language proxies its implementation through another. Required cases are not silently skipped.
+
+Sixteen versioned [JSON workflows](docs/scenario-format.md) cover all nine public operations and all six callback types, including balance and all three token grants. Shared schema-derived cases test missing/null/wrong-type fields, enums, exact money boundaries and required headers. Per-callback tests exercise every declared HTTP response plus lost responses, retry exhaustion and both forms of `Retry-After`. Independent Python probes retain processor barriers and multi-worker lease faults.
+
+The [coverage matrix](conformance/coverage-matrix.json) maps required workflows, validation profiles and lifecycle behavior to executable tests. A full run fails if any required test, public endpoint, declared inbound/callback status, JSON request field or validation assertion receipt is missing. JSON/JUnit reports, per-language `.coverage.json` assessments and redacted server logs are written under `.artifacts/conformance/` (ignored by Git). A filtered `--match` run is for debugging and always reports `qualified: false`. These gates describe the pinned local reference scope, not every possible data combination or real PSP certification.
 
 ## API and behavior
 
@@ -54,7 +58,7 @@ The harness launches native processes, signs the exact request bytes, validates 
 | `POST /payout` | Sync or pending payout and callback |
 | `GET /authorize`, `POST /token` | Explicit demo consent; code, refresh and wallet grants |
 
-Uber calls these paths on the PSP base URL, **not** on Uber's callback host. Callback clients cover `chargeCallback`, `payoutCallback`, `updateRefund`, `confirmDeposit`, `cancelDeposit` and `updateDeposit`. The latter three are **upstream-deprecated**, opt-in legacy callbacks, exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows, not an automatic routing rule for ordinary charges. Accepted U11 selects routing explicitly per asynchronous funding profile; it is not inferred from funding-code strings.
+Uber calls these paths on the PSP base URL, **not** on Uber's callback host. New integrations use `chargeCallback`, `payoutCallback` and `updateRefund`. The reference also demonstrates `confirmDeposit`, `cancelDeposit` and `updateDeposit`: these are **upstream-deprecated**, opt-in legacy callbacks, exercised by explicit `DEMO_DEPOSIT` approval/denial and reduced-amount flows. Callback routing is configured per funding profile, never inferred from funding-code strings.
 
 Demo profiles include sync/pending/reject, WebView/QR, capture hard/soft decline, refund pending rejection/late reversal, itemized meal-voucher balance, and a separate deposit flow. `contracts/reference-features.json` declares every profile plus triggers for all 14 charge and 10 payout callback reasons. These are local controls, **not** Uber-assigned funding codes. Demo accounts use BRL and begin with synthetic E5 balances. The HTTP contract uses integer E5 amounts, never floating-point money.
 
@@ -73,45 +77,39 @@ compose.yaml                Credential-free fake-money environment
 .github/workflows/          Per-language tests, conformance and container smoke gates
 ```
 
-The clone is self-contained: the API pin and documented local compatibility profile are in `contracts/`. `make contract` verifies the source hash and reproducible normalization; `tools/check_contract.py --check-live` detects website drift without overwriting the pin. See [review disposition and remaining gates](docs/review-follow-up.md) before treating schema acceptance as feature support.
+Clone the whole repository and choose one language. The language directories are not standalone packages: each uses the shared `contracts/` and `storage/migrations/` assets, PostgreSQL, and configured keys. The Dockerfiles package the selected gateway with its shared assets; the other two gateways are not runtime dependencies.
+
+The API pin and documented local compatibility profile are in `contracts/`. `make contract` verifies the source hash and reproducible normalization; `tools/check_contract.py --check-live` detects website drift without overwriting the pin.
+
+## PSP documentation
+
+| Guide | What you will learn |
+|---|---|
+| [PSP integration](docs/psp-integration.md) | Map your processor, wallet identity, funding methods and Uber onboarding configuration |
+| [Architecture](docs/architecture.md) | Understand request handling, ledger state, idempotency and callback delivery |
+| [Processor executor](docs/processor-executor.md) | Exercise the durable HTTP boundary, retries and unknown-outcome reconciliation |
+| [Security](docs/security.md) | Configure signing keys and understand synthetic-data and deployment boundaries |
+| [Operations](docs/operations.md) | Inspect blocked work, safely re-drive it and manage local state |
+| [Settlement](docs/settlement.md) | Generate and deliver reference reconciliation reports |
+| [Testing and scenarios](docs/scenario-format.md) | Run the suite, interpret coverage and add shared HTTP/failure workflows |
 
 ## Adapting this reference to your PSP
 
-Read [the integration guide](docs/psp-integration.md) and [architecture](docs/architecture.md). Use the native [durable HTTP processor executor](docs/processor-executor.md) to exercise the network boundary against an independent local fixture, then map your actual processor/wallet systems to that boundary. Follow the accepted reference profile and map it explicitly to the actual counterparty contract before external effects. There is intentionally no runnable real-money adapter, fabricated user authentication, production deployment or a real-counterparty settlement agreement.
+Start with the integration guide and architecture above. Use the native processor executor to exercise the network boundary against an independent local fixture, then map your actual processor/wallet systems to that boundary. Supply real resource-owner authentication, provision credentials through Uber onboarding, and qualify the chosen contract behavior before external effects. The repository does not include a runnable real-money adapter or production deployment.
 
-U1–U15 are accepted reference-project choices in [the decision register](contracts/decisions.json), with rationale and executable evidence. The derived runtime offers opt-in CANCELLED lookup (default wire status REJECTED) and supports one partial capture with remainder release; the upstream pin is unchanged. Project design acceptance is not Uber sandbox/production certification. See [owner decisions](docs/owner-decisions.md).
+Important compatibility defaults:
+
+- Cancelled/expired authorizations are returned as `REJECTED`. `ENABLE_CANCELLED_LOOKUP=true` enables the reference-only `CANCELLED` extension.
+- Descriptions accept Unicode and punctuation with the declared type/256-character limit. `STRICT_DESCRIPTION_PATTERN=true` restores the upstream pattern.
+- Manual authorization permits one full or partial capture, releases the unused hold and limits refunds to the captured amount.
+- Use `DEMO_REFUND_SYNC_REVERSAL` for the single-reversal callback example. The synthetic two-update variant requires `ENABLE_ASYNC_REFUND_REVERSAL=true` and is disabled by default.
+
+The [integration guide](docs/psp-integration.md#3-configure-api-compatibility-and-onboarding) explains compatibility behavior; `contracts/errata.json` records differences from the unchanged upstream pin. Passing local tests does not establish Uber sandbox or production certification.
 
 The [reference settlement workflow](docs/settlement.md) seals immutable per-source JSONL reports and a checksummed manifest, then publishes atomically to a private directory or strict-host-key loopback SFTP. Upload receipts are not financial acceptance or a claim that Uber uses this reference format.
 
-This is an intentional replacement of the old deposit-only UI. Its source is recoverable at Git commit `100c5f8`; it is not served or supported by version 2. No live data migration is involved.
-
 ## Verification scope
 
-Native build/unit and full shared conformance results are recorded in [implementation status](docs/IMPLEMENTATION_STATUS.md). Docker builds and Uber sandbox certification are separate checks; do not infer either from passing native tests. No real transactions, credentials or customer data belong in CI.
+Conformance runs write their results to `.artifacts/conformance/`; the per-language CI jobs also run unit tests and a container clone-and-run smoke test. The harness builds and controls these reference gateways, including database faults and process restarts; it is not a generic external-PSP URL certification tool. Docker builds and Uber sandbox certification are separate checks; do not infer either from passing native tests. No real transactions, credentials or customer data belong in CI.
 
 License: [Apache-2.0](LICENSE). See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-
-### November 24 review qualification
-
-Default lookup maps cancelled/expired authorizations to upstream `REJECTED`;
-`ENABLE_CANCELLED_LOOKUP=true` explicitly enables the reference-only extension.
-`STRICT_DESCRIPTION_PATTERN=true` opts into upstream's example-conflicting regex.
-New partners use the three current callbacks; the other three deposit callbacks
-are **upstream-deprecated**, opt-in legacy examples. See
-[review dispositions](docs/review-2026-11-24.md),
-[operator re-drive and elapsed retry budgets](docs/operations.md), and
-[published-example/field mapping](docs/psp-integration.md).
-
-
-### Completed reference-owner policies
-
-O1–O7 in the decision register close the remaining reference choices. Consent has
-shared per-client/per-peer limits, expired tokens are purged and old completed
-hot rows are archived without losing replay. Namespaces reject a runtime/storage
-or instrument-key mismatch; select a fresh CLIENT_ID/Compose project for another
-language or pre-binding local data. The two-update refund demonstration requires
-ENABLE_ASYNC_REFUND_REVERSAL=true; the default single-reversal example is
-DEMO_REFUND_SYNC_REVERSAL. All base images/Actions are immutable pins and gateways
-receive public signing keys only. See docs/completion-qualification.md for exact
-scope and test evidence. No sandbox/live-money approval is implied.

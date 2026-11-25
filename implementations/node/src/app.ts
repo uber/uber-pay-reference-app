@@ -384,6 +384,8 @@ ${amount}<button name="decision" value="approve">${text('confirm')}</button><but
               [config.clientId, resourceId],
             )
           ).rows[0]?.account_id;
+        // Malformed selectors are request errors, not token ownership failures.
+        if (account !== undefined && typeof account !== 'string') throw new Failure(400);
         await service.bearer(req.get('authorization'), scope, account);
       }
       const execute =

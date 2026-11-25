@@ -44,8 +44,15 @@ implementations/java/mvnw test package
 
 Unit tests cover exact int64 values, schema composition, bounded malformed signatures, stale/future signatures, raw-target/body tampering, all callback builders, all public adapter ports, and nonlocal-mode guards. The root black-box suite tests the same server-visible behaviors as Node and Go, including concurrent duplication, capture/cancel races, explicit consent, all token grants, callbacks/retries, and process restart.
 
-## Review-hardened local policies
+## Runtime defaults and integration guides
 
-`ACTION_TTL_MS` defaults 600000; `REFRESH_TOKEN_TTL_SECONDS` defaults 2592000. `STRICT_ACCOUNT_NAME=true` is an explicit compatibility opt-in. Unexpected failures remain 500; callback 401 evicts its token and retries. The native adapter is local/in-process only, not a plug-in network processor. The native `ProcessorExecutor` is the separate HTTP boundary: see `docs/processor-executor.md` for encrypted intents, reservations, out-of-transaction dispatch, fenced finalization and provider-key recovery. It is runnable against the independent local fixture; nonlocal modes remain forbidden. Shared feature profiles include reversal/debt, deposit amount ordering, all reason triggers, funding aliases and bilingual consent/errors. See `docs/review-follow-up.md` for accepted reference decisions and real-integration prerequisites.
+`ACTION_TTL_MS` defaults to 600000 and `REFRESH_TOKEN_TTL_SECONDS` to 2592000.
+Unexpected failures return HTTP 500; callback HTTP 401 evicts the cached token
+and retries. For configuration, supported behavior and adopter responsibilities,
+read the [PSP integration guide](../../docs/psp-integration.md).
 
-Accepted U1–U15 choices, rationale and test evidence are in `contracts/decisions.json`. The standalone reference settlement utility and local SFTP workflow are documented in `docs/settlement.md`; they are not a gateway runtime sidecar or a production settlement agreement.
+The [processor executor](../../docs/processor-executor.md) documents the native
+HTTP boundary. [Operations](../../docs/operations.md) covers blocked work and
+safe re-drive. The [settlement guide](../../docs/settlement.md) covers the
+standalone reconciliation utility and local SFTP workflow; neither is a gateway
+sidecar or a production settlement agreement.
