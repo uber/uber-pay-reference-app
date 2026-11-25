@@ -1,0 +1,213 @@
+{
+  "scope": "Implemented reference-contract differences; design choices accepted in decisions.json. Not upstream certification.",
+  "entries": [
+    {
+      "id": "payout-required-array",
+      "pointer": "/components/schemas/PayoutCallbackState/required",
+      "kind": "schema syntax",
+      "before": "value",
+      "after": [
+        "value"
+      ],
+      "reason": "OpenAPI required must be an array; preserves the declared field."
+    },
+    {
+      "id": "path-required-location",
+      "pointers": [
+        "/paths/~1charge~1{id}~1capture/post/parameters",
+        "/paths/~1charge~1{id}~1cancel/post/parameters"
+      ],
+      "kind": "schema syntax",
+      "reason": "Move required:true from path parameter schema to parameter. No request field added."
+    },
+    {
+      "id": "token-response-overlap",
+      "kind": "validation dispatch",
+      "reason": "RefreshTokenResponse and WalletGrantRefreshTokenResponse overlap structurally, so validate token responses by the request grant type. Do not alter upstream oneOf."
+    },
+    {
+      "id": "account-name-required",
+      "kind": "accepted reference decision",
+      "reason": "Optional; accept the published account examples. STRICT_ACCOUNT_NAME is an explicit opt-in interoperability profile.",
+      "decision": "U1",
+      "status": "accepted"
+    },
+    {
+      "id": "refund-status",
+      "kind": "accepted reference decision",
+      "reason": "Use declared CONFIRMED/PENDING/REJECTED, not contradictory SUCCEEDED/FAILED examples.",
+      "decision": "U13",
+      "status": "accepted"
+    },
+    {
+      "id": "lookup-status",
+      "kind": "accepted reference decision",
+      "reason": "Return200 REJECTED for cancelled/expired authorizations by default, with no confirmed_at. ENABLE_CANCELLED_LOOKUP=true opts into the explicit CANCELLED derived-runtime extension. Internal state remains CANCELLED.",
+      "decision": "U4",
+      "status": "accepted",
+      "review_decision": "D1"
+    },
+    {
+      "id": "payout-rejection",
+      "kind": "semantic launch gate",
+      "reason": "Initial payout rejection uses the applicable declared400/422 detail; asynchronous rejection uses payoutCallback.",
+      "status": "accepted"
+    },
+    {
+      "id": "partial-capture",
+      "kind": "accepted reference decision",
+      "reason": "Allow one positive capture up to the authorization. Successful partial capture closes it and releases all unused hold; preserve authorized_e5 and store amount_e5 as actually captured. Refunds are capped at captured funds; another capture conflicts409.",
+      "decision": "U5",
+      "status": "accepted"
+    },
+    {
+      "id": "callback-routing",
+      "kind": "accepted reference decision",
+      "reason": "Explicit funding-profile callback routing: new integrations use chargeCallback. Only legacy, opt-in deposit profiles use the upstream-deprecated confirmDeposit/cancelDeposit/updateDeposit. A reduced amount update precedes confirmation.",
+      "decision": "U11",
+      "status": "accepted"
+    },
+    {
+      "id": "transient-5xx",
+      "kind": "accepted reference decision",
+      "decision": "U3",
+      "reason": "Unexpected/transient errors return retryable500 on every route, empty when undeclared, and are never cached. Authentication uses declared401, otherwise the existing declared400 mapping.",
+      "status": "accepted"
+    },
+    {
+      "id": "refresh-reuse",
+      "kind": "accepted reference decision",
+      "decision": "U2",
+      "reason": "Reusable refresh tokens, 30-day configurable lifetime, 10-minute access tokens; code reuse revokes its issued family. No rotation field in refresh responses.",
+      "status": "accepted"
+    },
+    {
+      "id": "capture-decline",
+      "kind": "accepted reference decision",
+      "decision": "U6",
+      "reason": "Return422 with BANK_HARD_ERROR/BANK_SOFT_ERROR. A definitive rejected capture does not debit and releases the entire original authorization, including a partial-capture attempt. Unknown transport outcomes remain retryable500/reconciliation.",
+      "status": "accepted"
+    },
+    {
+      "id": "cancel-empty-response",
+      "kind": "accepted reference decision",
+      "decision": "U7",
+      "reason": "An empty200 on successful cancellation.",
+      "status": "accepted"
+    },
+    {
+      "id": "lookup-identity",
+      "kind": "accepted reference decision",
+      "decision": "U8",
+      "reason": "Use Uber transaction/refund ID; merchant_reference, if supplied, must match.",
+      "status": "accepted"
+    },
+    {
+      "id": "rejected-callback-reference",
+      "kind": "accepted reference decision",
+      "decision": "U9",
+      "reason": "Always include an immutable PSP reference, including rejection.",
+      "status": "accepted"
+    },
+    {
+      "id": "code-exchange-response",
+      "kind": "accepted reference decision",
+      "decision": "U10",
+      "reason": "Code exchange returns refresh token; obtain access token using the refresh grant.",
+      "status": "accepted"
+    },
+    {
+      "id": "balance-request",
+      "kind": "accepted reference decision",
+      "decision": "U12",
+      "reason": "Use account_id and funding_method, with scoped account-bound bearer plus signature.",
+      "status": "accepted"
+    },
+    {
+      "id": "refund-request-response",
+      "kind": "accepted reference policy",
+      "decision": "U13",
+      "reason": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse. This is a delegated reference-owner decision, not an answer received from Uber.",
+      "status": "accepted",
+      "review_decision": "D2"
+    },
+    {
+      "id": "payout-conflict",
+      "kind": "accepted reference decision",
+      "decision": "U14",
+      "reason": "Changed payload under the same payout ID or key returns409 DUPLICATE_REQUEST_ERROR; identical payload replays.",
+      "status": "accepted"
+    },
+    {
+      "id": "settlement-bilateral",
+      "kind": "accepted reference decision",
+      "decision": "U15",
+      "reason": "Closed UTC periods, daily by default; immutable confirmation/reversal journal; one canonical JSONL file per source account and a checksummed manifest; decimal-string signed E5 and per-currency totals. Seal once, reject overlaps, replay bytes. Atomic directory or strict-host-key local SFTP publication occurs outside SQL; transport receipt is not financial acceptance.",
+      "status": "accepted"
+    },
+    {
+      "id": "description-example-pattern",
+      "kind": "accepted reference decision",
+      "decision": "D3",
+      "reason": "Relax only TransactionDescription.pattern by default; retain x-upstream-pattern for explicit strict opt-in, type and maxLength256. Published authentication example includes punctuation forbidden by its pattern.",
+      "status": "accepted"
+    },
+    {
+      "id": "deprecated-informational-uri",
+      "kind": "request compatibility",
+      "reason": "Validate deprecated Account.uri, AccountOwner.uri and Deposit.uri as strings, not absolute URIs. The published example uses a network-path reference. Do not relax real action or redirect URL policy.",
+      "status": "accepted"
+    },
+    {
+      "id": "published-charge-example-incomplete",
+      "kind": "upstream example discrepancy",
+      "reason": "The literal authentication curl body also omits schema-required id and authorization, beyond the three R6 causes. Preserve it as a fixture and reject it unchanged; golden interoperability case supplies these two required fields and substitutes only the assigned funding method. Never derive a money identity or authorization from an informational field.",
+      "status": "documented"
+    },
+    {
+      "id": "refund-reversal-callback-count",
+      "kind": "accepted reference policy",
+      "decision": "D2",
+      "reason": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse. This is a delegated reference-owner decision, not an answer received from Uber.",
+      "status": "accepted"
+    },
+    {
+      "id": "oauth-exact-redirect-registration",
+      "kind": "security policy",
+      "reason": "Retain exact OAuth redirect_uri registration despite upstream discouraging allowlisting. Uber redirect changes must be registered first. Payment return_url has a separate scheme/authority/path allowlist preserving query bytes.",
+      "status": "accepted"
+    },
+    {
+      "id": "oauth-unsupported-response-type",
+      "kind": "protocol precision",
+      "reason": "Authorize uses unsupported_response_type (RFC6749) rather than the inconsistent upstream unsupported_grant_type example; echo state only if supplied.",
+      "status": "accepted"
+    },
+    {
+      "id": "upstream-deprecated-surface",
+      "kind": "documentation",
+      "reason": "confirmDeposit/cancelDeposit/updateDeposit, charge.session_id, charge response merchant_reference/metadata, updateDeposit.metadata and all Account/AccountOwner/Deposit uri fields are upstream-deprecated. Legacy callbacks remain opt-in, not recommended for new integrations.",
+      "status": "documented"
+    },
+    {
+      "id": "payout-lookup-scope",
+      "kind": "accepted reference scope",
+      "reason": "Keep find-transaction limited to charges/refunds and return404 for payout IDs. Payout recovery uses original provider-key reconciliation and callbacks; do not add an undeclared public operation.",
+      "status": "accepted"
+    },
+    {
+      "id": "public-consent-admission",
+      "kind": "reference operational protection",
+      "status": "accepted",
+      "reason": "Unsigned consent is rate-limited before persistence with429 and Retry-After60; validated internal errors use registered OAuth server_error redirects. No signed money-operation status is changed."
+    },
+    {
+      "id": "runtime-storage-boundary",
+      "kind": "reference storage policy",
+      "status": "accepted",
+      "reason": "Bind every fresh client namespace to native runtime, storage version2 and independent instrument-key hash. Reject legacy/unversioned populated state, cross-language reuse or silent fingerprint-key changes. Rotating OAuth client credentials does not rotate instrument identity."
+    }
+  ],
+  "decision_register": "decisions.json",
+  "qualification": "Reference design accepted by delegated project authority; no real-money mode or external certification is claimed."
+}

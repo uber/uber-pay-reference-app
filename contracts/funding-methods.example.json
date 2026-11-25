@@ -1,0 +1,30 @@
+{
+  "TEST_ASSIGNED_BR": {
+    "method": "DEMO_SYNC",
+    "countries": [
+      "BR"
+    ],
+    "currencies": [
+      "BRL"
+    ]
+  },
+  "TEST_ASSIGNED_SG": {
+    "method": "DEMO_SYNC",
+    "countries": [
+      "SG"
+    ],
+    "currencies": [
+      "SGD"
+    ]
+  },
+  "TEST_ASSIGNED_DEPOSIT_BR": {
+    "method": "DEMO_DEPOSIT",
+    "callback_mode": "deposit",
+    "countries": [
+      "BR"
+    ],
+    "currencies": [
+      "BRL"
+    ]
+  }
+}

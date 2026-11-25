@@ -1,0 +1,406 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "name": "wallet_grant_refresh_and_balance",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/token",
+          "expect": {
+            "status": 200,
+            "body": {
+              "authorization_details.0.account_id": "demo-account",
+              "authorization_details.0.display_name": "Synthetic wallet"
+            }
+          },
+          "fixture": "wallet-grant",
+          "grant": "urn:uberpay:params:oauth:grant-type:wallet-grant",
+          "bind": {
+            "refresh": "refresh_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/token",
+          "expect": {
+            "status": 200,
+            "body": {
+              "token_type": "bearer"
+            }
+          },
+          "payload": {
+            "client_id": "${client_id}",
+            "client_secret": "${client_secret}",
+            "grant_type": "refresh_token",
+            "refresh_token": "${refresh}"
+          },
+          "grant": "refresh_token",
+          "bind": {
+            "access": "access_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/balance",
+          "expect": {
+            "status": 200,
+            "body": {
+              "available_balance.currency": "BRL",
+              "balance.currency": "BRL"
+            }
+          },
+          "fixture": "balance",
+          "request": {
+            "token": "${access}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "authorization_code_refresh_and_balance",
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/authorize",
+          "expect": {
+            "status": 200,
+            "contains": [
+              "DEMO_SYNC",
+              "BR",
+              "charge",
+              "refund",
+              "get_balance",
+              "offline_access"
+            ]
+          },
+          "query": {
+            "client_id": "${client_id}",
+            "response_type": "code",
+            "redirect_uri": "http://127.0.0.1:9090/return",
+            "scope": "charge refund get_balance offline_access",
+            "state": "${id}",
+            "authorization_details": [
+              {
+                "type": "authorization_detail",
+                "funding_method": "DEMO_SYNC",
+                "country_iso2": "BR",
+                "locale": "en-US"
+              }
+            ]
+          },
+          "request": {
+            "signed": false
+          },
+          "browser": true,
+          "save": "consent_page"
+        },
+        {
+          "op": "form",
+          "url": "/uberpay/v1/authorize",
+          "page": "consent_page",
+          "save": "consent"
+        },
+        {
+          "op": "form_submit",
+          "form": "consent",
+          "fields": {
+            "decision": "approve"
+          },
+          "expect": {
+            "status": 302,
+            "redirect": {
+              "uri": "http://127.0.0.1:9090/return",
+              "query": {
+                "state": "${id}"
+              }
+            }
+          },
+          "bind_redirect": {
+            "code": "code"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/token",
+          "expect": {
+            "status": 200,
+            "body": {
+              "authorization_details.0.account_id": "demo-account"
+            }
+          },
+          "payload": {
+            "client_id": "${client_id}",
+            "client_secret": "${client_secret}",
+            "grant_type": "authorization_code",
+            "code": "${code}",
+            "redirect_uri": "http://127.0.0.1:9090/return"
+          },
+          "grant": "authorization_code",
+          "bind": {
+            "refresh": "refresh_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/token",
+          "expect": {
+            "status": 200,
+            "body": {
+              "token_type": "bearer"
+            }
+          },
+          "payload": {
+            "client_id": "${client_id}",
+            "client_secret": "${client_secret}",
+            "grant_type": "refresh_token",
+            "refresh_token": "${refresh}"
+          },
+          "grant": "refresh_token",
+          "bind": {
+            "access": "access_token"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/balance",
+          "expect": {
+            "status": 200,
+            "body": {
+              "available_balance.currency": "BRL",
+              "balance.currency": "BRL"
+            }
+          },
+          "fixture": "balance",
+          "request": {
+            "token": "${access}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pending_payout_callback",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/payout",
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "PENDING"
+            }
+          },
+          "fixture": "payout",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_PENDING"
+          },
+          "bind": {
+            "psp": "psp_reference"
+          }
+        },
+        {
+          "op": "callback",
+          "name": "payoutCallback",
+          "id": "${id}",
+          "body": {
+            "state.value": "CONFIRMED",
+            "psp_reference": "${psp}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "legacy_deposit_confirmation",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "PENDING"
+            }
+          },
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_DEPOSIT"
+          },
+          "bind": {
+            "action": "actions.0.url",
+            "psp": "psp_reference"
+          }
+        },
+        {
+          "op": "form",
+          "url": "${action}",
+          "save": "payment"
+        },
+        {
+          "op": "form_submit",
+          "form": "payment",
+          "fields": {
+            "decision": "approve"
+          },
+          "expect": {
+            "status": 302
+          }
+        },
+        {
+          "op": "callback",
+          "name": "confirmDeposit",
+          "id": "${id}",
+          "body": {
+            "merchant_reference": "${psp}"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "expect": {
+            "status": 200,
+            "body": {
+              "id": "${id}",
+              "status": "CONFIRMED",
+              "amount.value": 1000000
+            }
+          },
+          "contract_path": "/find-transaction"
+        }
+      ]
+    },
+    {
+      "name": "legacy_deposit_cancellation",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "PENDING"
+            }
+          },
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_DEPOSIT"
+          },
+          "bind": {
+            "action": "actions.0.url",
+            "psp": "psp_reference"
+          }
+        },
+        {
+          "op": "form",
+          "url": "${action}",
+          "save": "payment"
+        },
+        {
+          "op": "form_submit",
+          "form": "payment",
+          "fields": {
+            "decision": "deny"
+          },
+          "expect": {
+            "status": 302
+          }
+        },
+        {
+          "op": "callback",
+          "name": "cancelDeposit",
+          "id": "${id}",
+          "body": {
+            "merchant_reference": "${psp}",
+            "cancel_reason": "USER_CANCELLED"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "expect": {
+            "status": 200,
+            "body": {
+              "id": "${id}",
+              "status": "REJECTED",
+              "amount.value": 1000000
+            }
+          },
+          "contract_path": "/find-transaction"
+        }
+      ]
+    },
+    {
+      "name": "legacy_deposit_reduced_amount_before_confirmation",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "PENDING"
+            }
+          },
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_DEPOSIT"
+          },
+          "bind": {
+            "action": "actions.0.url",
+            "psp": "psp_reference"
+          }
+        },
+        {
+          "op": "form",
+          "url": "${action}",
+          "save": "payment"
+        },
+        {
+          "op": "form_submit",
+          "form": "payment",
+          "fields": {
+            "decision": "approve",
+            "amount_e5": "500000"
+          },
+          "expect": {
+            "status": 302
+          }
+        },
+        {
+          "op": "callback",
+          "name": "updateDeposit",
+          "id": "${id}",
+          "body": {
+            "merchant_reference": "${psp}",
+            "amount.value": 500000,
+            "amount.currency": "BRL"
+          }
+        },
+        {
+          "op": "callback",
+          "name": "confirmDeposit",
+          "id": "${id}",
+          "body": {
+            "merchant_reference": "${psp}"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "expect": {
+            "status": 200,
+            "body": {
+              "id": "${id}",
+              "status": "CONFIRMED",
+              "amount.value": 500000
+            }
+          },
+          "contract_path": "/find-transaction"
+        }
+      ]
+    }
+  ]
+}

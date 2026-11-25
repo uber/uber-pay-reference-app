@@ -1,0 +1,19 @@
+{
+  "capture": {
+    "DEMO_CAPTURE_HARD": "BANK_HARD_ERROR",
+    "DEMO_CAPTURE_SOFT": "BANK_SOFT_ERROR"
+  },
+  "payout_payee_400": {
+    "invalid-account": "INVALID_PAYMENT_DETAILS_ERROR"
+  },
+  "payout_payee_422": {
+    "inactive-account": "INACTIVE_ACCOUNT_ERROR",
+    "fraud-account": "PAYMENT_FRAUD_ERROR",
+    "hard-decline-account": "PAYMENT_PSP_HARD_DECLINE_ERROR",
+    "bank-hard-account": "BANK_HARD_ERROR",
+    "merchant-rejected-account": "MERCHANT_REJECTED",
+    "network-error-account": "PAYMENT_NETWORK_ERROR",
+    "psp-error-account": "PAYMENT_PSP_ERROR",
+    "payment-error-account": "PAYMENT_ERROR"
+  }
+}

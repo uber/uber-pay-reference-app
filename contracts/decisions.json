@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "decided_on_local_date": "2026-11-20",
+  "authority": "Reference-project design authority delegated by the user: Take the best decisions as the owner and complete the implementation.",
+  "scope": "Decisions for this reference implementation, not an assertion of upstream API-owner approval or production/sandbox certification.",
+  "status": "accepted",
+  "upstream_pin_unchanged": true,
+  "decisions": [
+    {
+      "id": "U1",
+      "title": "Account.name",
+      "status": "accepted",
+      "choice": "Optional; accept the published account examples. STRICT_ACCOUNT_NAME is an explicit opt-in interoperability profile.",
+      "rationale": "Avoid rejecting valid documented account shapes because of an undefined required property.",
+      "acceptance_test": "test_review_account_examples_do_not_require_undefined_name"
+    },
+    {
+      "id": "U2",
+      "title": "Refresh token lifecycle",
+      "status": "accepted",
+      "choice": "Reusable refresh tokens, 30-day configurable lifetime, 10-minute access tokens; code reuse revokes its issued family. No rotation field in refresh responses.",
+      "rationale": "Keep the declared response shape and do not assume Uber persists replacement refresh tokens.",
+      "acceptance_test": "test_review_refresh_reusable_no_undeclared_rotation"
+    },
+    {
+      "id": "U3",
+      "title": "HTTP errors",
+      "status": "accepted",
+      "choice": "Unexpected/transient errors return retryable500 on every route, empty when undeclared, and are never cached. Authentication uses declared401, otherwise the existing declared400 mapping.",
+      "rationale": "Never misclassify infrastructure failures as final validation errors; minimize unnecessary wire-contract changes.",
+      "acceptance_test": "test_review_transient_errors_all_routes_retry_same_key"
+    },
+    {
+      "id": "U4",
+      "title": "Cancelled lookup",
+      "status": "accepted",
+      "choice": "Return200 REJECTED for cancelled/expired authorizations by default, with no confirmed_at. ENABLE_CANCELLED_LOOKUP=true opts into the explicit CANCELLED derived-runtime extension. Internal state remains CANCELLED.",
+      "rationale": "A successful lookup should describe a known terminal business state rather than return a validation error. This is a visible additive reference-contract extension.",
+      "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal",
+      "updated_on": "2026-11-24"
+    },
+    {
+      "id": "U5",
+      "title": "Partial capture",
+      "status": "accepted",
+      "choice": "Allow one positive capture up to the authorization. Successful partial capture closes it and releases all unused hold; preserve authorized_e5 and store amount_e5 as actually captured. Refunds are capped at captured funds; another capture conflicts409.",
+      "rationale": "Support a useful payment lifecycle without ambiguous multi-capture accounting or indefinitely retained residual holds.",
+      "acceptance_test": "test_owner_partial_capture_http_releases_remainder_and_limits_refunds"
+    },
+    {
+      "id": "U6",
+      "title": "Capture decline",
+      "status": "accepted",
+      "choice": "Return422 with BANK_HARD_ERROR/BANK_SOFT_ERROR. A definitive rejected capture does not debit and releases the entire original authorization, including a partial-capture attempt. Unknown transport outcomes remain retryable500/reconciliation.",
+      "rationale": "Follow the declared error response and distinguish a known business rejection from an uncertain processor effect.",
+      "acceptance_test": "test_review_capture_declines_do_not_debit"
+    },
+    {
+      "id": "U7",
+      "title": "Cancel response",
+      "status": "accepted",
+      "choice": "An empty200 on successful cancellation.",
+      "rationale": "Follow the declared response schema; do not invent a response body.",
+      "acceptance_test": "test_manual_cancel"
+    },
+    {
+      "id": "U8",
+      "title": "Lookup identity",
+      "status": "accepted",
+      "choice": "Use Uber transaction/refund ID; merchant_reference, if supplied, must match.",
+      "rationale": "Follow parameter definitions and keep Uber identity separate from PSP reference.",
+      "acceptance_test": "test_review_reference_mismatch_and_missing_resources"
+    },
+    {
+      "id": "U9",
+      "title": "Rejected callback reference",
+      "status": "accepted",
+      "choice": "Always include an immutable PSP reference, including rejection.",
+      "rationale": "Satisfy the required schema and make reconciliation unambiguous.",
+      "acceptance_test": "test_complete_charge_reason_enum_sync_and_async"
+    },
+    {
+      "id": "U10",
+      "title": "Authorization-code result",
+      "status": "accepted",
+      "choice": "Code exchange returns refresh token; obtain access token using the refresh grant.",
+      "rationale": "Follow grant-specific schemas rather than conflicting sequence diagrams.",
+      "acceptance_test": "test_authorize_code_exchange_single_use"
+    },
+    {
+      "id": "U11",
+      "title": "Deposit callback routing",
+      "status": "accepted",
+      "choice": "Explicit funding-profile callback routing: new integrations use chargeCallback. Only legacy, opt-in deposit profiles use the upstream-deprecated confirmDeposit/cancelDeposit/updateDeposit. A reduced amount update precedes confirmation.",
+      "rationale": "No heuristic routing by transaction ID or funding-code string. Preserve clear flow boundaries and never increase a user-approved hold without new authorization.",
+      "acceptance_test": "test_owner_provider_deposit_amount_update_is_ordered_and_bounded",
+      "updated_on": "2026-11-24"
+    },
+    {
+      "id": "U12",
+      "title": "Balance request",
+      "status": "accepted",
+      "choice": "Use account_id and funding_method, with scoped account-bound bearer plus signature.",
+      "rationale": "Follow the actual operation schema and preserve ownership checks.",
+      "acceptance_test": "test_wallet_grant_and_scoped_balance"
+    },
+    {
+      "id": "U13",
+      "title": "Refund wire contract",
+      "status": "accepted",
+      "choice": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse. Retain declared refund fields/statuses and idempotent local inverse/debt with protected unrelated holds.",
+      "rationale": "Follow schemas; implement a durable, auditable local reversal policy rather than contradictory SUCCEEDED/FAILED examples.",
+      "acceptance_test": "test_complete_refund_pending_rejection_and_reversal",
+      "updated_on": "2026-11-24"
+    },
+    {
+      "id": "U14",
+      "title": "Payout identity conflict",
+      "status": "accepted",
+      "choice": "Changed payload under the same payout ID or key returns409 DUPLICATE_REQUEST_ERROR; identical payload replays.",
+      "rationale": "Use the declared conflict response and never repeat a payout effect to resolve a key conflict.",
+      "acceptance_test": "test_review_payout_declared_conflicts_declines_and_ledger"
+    },
+    {
+      "id": "U15",
+      "title": "Reference settlement",
+      "status": "accepted",
+      "choice": "Closed UTC periods, daily by default; immutable confirmation/reversal journal; one canonical JSONL file per source account with monetary entries (an empty period has an empty manifest) and a checksummed manifest; decimal-string signed E5 and per-currency totals. Seal once, reject overlaps, replay bytes. Atomic directory or strict-host-key local SFTP publication occurs outside SQL; transport receipt is not financial acceptance.",
+      "rationale": "Provide a complete runnable reconciliation workflow without claiming the chosen format is an Uber bilateral format or fabricating real hosts, keys, schedules, commercial netting or acceptance.",
+      "acceptance_test": "test_owner_settlement_journal_seal_and_real_sftp_delivery"
+    }
+  ],
+  "reviewed_on_local_date": "2026-11-24",
+  "review_decisions": [
+    {
+      "id": "D1",
+      "status": "accepted",
+      "choice": "Return200 REJECTED for cancelled/expired authorizations by default, with no confirmed_at. ENABLE_CANCELLED_LOOKUP=true opts into the explicit CANCELLED derived-runtime extension. Internal state remains CANCELLED.",
+      "rationale": "Prefer an upstream enum by default without losing the more precise local state. No external enum approval is claimed.",
+      "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal"
+    },
+    {
+      "id": "D2",
+      "status": "accepted",
+      "choice": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse.",
+      "rationale": "Avoid requiring a disputed callback-count interpretation for the default example; do not fabricate external approval.",
+      "acceptance_test": "test_consolidated_d1_cancelled_lookup_flag_and_d2_single_reversal"
+    },
+    {
+      "id": "D3",
+      "status": "accepted",
+      "choice": "Description type and maxLength256 remain mandatory. Pattern enforcement is opt-in STRICT_DESCRIPTION_PATTERN=true; default accepts punctuation and Unicode.",
+      "rationale": "The published example violates its own pattern; never drop escaping or required payment identity/authorization.",
+      "acceptance_test": "test_consolidated_r6_published_payload_and_each_erratum"
+    }
+  ],
+  "completed_on_local_date": "2026-11-24",
+  "completion_decisions": [
+    {
+      "id": "O1",
+      "title": "Refund reversal callback policy",
+      "status": "accepted",
+      "choice": "Use synchronous201 CONFIRMED then one REJECTED updateRefund by default. ENABLE_ASYNC_REFUND_REVERSAL=false refuses the synthetic two-callback funding profile; true is an explicit reference/test interpretation of the reversal exception. Never suppress an actual financial inverse.",
+      "rationale": "Avoid requiring a disputed callback-count interpretation for the default example; do not fabricate external approval.",
+      "acceptance_test": "test_owner2_strict_refund_default_and_lookup_scope"
+    },
+    {
+      "id": "O2",
+      "title": "Payout lookup scope",
+      "status": "accepted",
+      "choice": "Keep find-transaction limited to charges/refunds and return404 for payout IDs. Payout recovery uses original provider-key reconciliation and callbacks; do not add an undeclared public operation.",
+      "rationale": "The published scope is sufficiently explicit to make a reference-project decision without waiting for a speculative requirement.",
+      "acceptance_test": "test_owner2_strict_refund_default_and_lookup_scope"
+    },
+    {
+      "id": "O3",
+      "title": "Retention and exact replay",
+      "status": "accepted",
+      "choice": "Purge expired token records; archive operations and DONE jobs older than7days in bounded200-row batches once per minute. Keep unfinished work live and preserve immutable replay bytes, fingerprints, headers and event identities indefinitely in local archives.",
+      "rationale": "Bound the hot working set without breaking money idempotency, revocation of live grants, event ordering or financial evidence. This is not a legal real-data retention policy.",
+      "acceptance_test": "test_owner2_archive_preserves_replay_and_unresolved_work"
+    },
+    {
+      "id": "O4",
+      "title": "Public endpoint abuse controls",
+      "status": "accepted",
+      "choice": "Admit consent via atomic PostgreSQL fixed-minute counters: default200/client and60/peer IP, counting actual peer rather than forwarded headers. Reject with429/Retry-After60 before creating a consent row. Expire old buckets; signed money operations have separate admission. Validated OAuth internal failures redirect server_error with original state.",
+      "rationale": "Bound unauthenticated row growth and keep financial locks independent, while retaining external edge controls as deployment requirements.",
+      "acceptance_test": "test_owner2_authorize_server_error_and_bounded_abuse"
+    },
+    {
+      "id": "O5",
+      "title": "Runtime and identity stability",
+      "status": "accepted",
+      "choice": "Bind every fresh client namespace to native runtime, storage version2 and independent instrument-key hash. Reject legacy/unversioned populated state, cross-language reuse or silent fingerprint-key changes. Rotating OAuth client credentials does not rotate instrument identity.",
+      "rationale": "A fresh namespace is safer than inventing a migration for incompatible replay/ciphertext formats in a no-live-data reference repo.",
+      "acceptance_test": "test_owner2_runtime_guard_and_stable_instrument_rotation"
+    },
+    {
+      "id": "O6",
+      "title": "Semantic release gate",
+      "status": "accepted",
+      "choice": "Run the same independent wire scenarios for every language, including exactly-once ledger witnesses after crash/lost-response,100000-row index-plan regression, bounded public abuse, async/deposit/expiry/duplicate settlement events, multi-source/currency reporting, concurrent seals and commit-clock boundary checks.",
+      "rationale": "Operation/status coverage alone was insufficient; require meaningful behavioral and accounting evidence without claiming production scale certification.",
+      "acceptance_test": "test_owner2_settlement_lifecycles_and_concurrent_seals"
+    },
+    {
+      "id": "O7",
+      "title": "Supply-chain and key separation",
+      "status": "accepted",
+      "choice": "Pin all seven base/service images by verified manifest digest and all six official Actions by commit. Run fixture/keygen as non-root; export a public-only gateway key volume and keep the development private key only in the fixture/client volume.",
+      "rationale": "Prevent floating dependency drift and avoid granting the Java container access to a signing private key merely because Unix UIDs match.",
+      "acceptance_test": "test_pins_nonroot_execution_and_key_mount_separation"
+    }
+  ]
+}

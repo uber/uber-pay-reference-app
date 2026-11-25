@@ -1,0 +1,66 @@
+{
+  "verified_on": "2026-11-24",
+  "images": {
+    "python:3.13-slim": {
+      "digest": "sha256:6d68eb6310a906f26c7638eb6ea7557d4261662df3181af2f80f1f9a7e34c549",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://registry-1.docker.io/v2/"
+    },
+    "node:24.8.0-bookworm-slim": {
+      "digest": "sha256:cadbfafeb6baf87eaaffa40b3640209c4b7fd38cebde65059d15bc39cd636b85",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://registry-1.docker.io/v2/"
+    },
+    "maven:3.9.11-eclipse-temurin-21": {
+      "digest": "sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://registry-1.docker.io/v2/"
+    },
+    "eclipse-temurin:21-jre": {
+      "digest": "sha256:d77e090ae1f6970c047b443c6f0a6c1358b0426d44432bb5a7753408cd43de0d",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://registry-1.docker.io/v2/"
+    },
+    "golang:1.25-alpine": {
+      "digest": "sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://registry-1.docker.io/v2/"
+    },
+    "postgres:17": {
+      "digest": "sha256:cdbfb3de010ef603c29f10a5dfc79e023f66ad662ec6fddcda7130afe5d65e7b",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://registry-1.docker.io/v2/"
+    },
+    "gcr.io/distroless/static-debian12:nonroot": {
+      "digest": "sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": "https://gcr.io/v2/"
+    }
+  },
+  "actions": {
+    "actions/checkout": {
+      "tag": "v4",
+      "commit": "11d5960a326750d5838078e36cf38b85af677262"
+    },
+    "actions/setup-python": {
+      "tag": "v5",
+      "commit": "a26af69be951a213d495a4c3e4e4022e16d87065"
+    },
+    "actions/setup-node": {
+      "tag": "v4",
+      "commit": "49933ea5288caeca8642d1e84afbd3f7d6820020"
+    },
+    "actions/setup-go": {
+      "tag": "v5",
+      "commit": "40f1582b2485089dde7abd97c1529aa768e1baff"
+    },
+    "actions/setup-java": {
+      "tag": "v4",
+      "commit": "cf277c60eb25467037889841efdb72551f06f6c3"
+    },
+    "actions/upload-artifact": {
+      "tag": "v4",
+      "commit": "ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  }
+}

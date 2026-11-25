@@ -1,0 +1,26 @@
+{
+  "source_url": "https://uberpay.uber.com/",
+  "retrieved_at_utc": "2026-10-28T08:16:48.027163+00:00",
+  "source_format": "OpenAPI spec.data extracted from embedded ReDoc __redoc_state in HTML",
+  "openapi_version": "3.0.3",
+  "api_title": "Uber Pay API",
+  "api_version": "1.4",
+  "source_html_sha256": "57fddca9ccfd80c6ead2f4463e9ece5ea4a7a83fabac0566a812816eb4ce2943",
+  "openapi_json_sha256": "5370630246b01a9e00489c4aeccf16f7e0ce40d57bbc25c7a976dd59f23f7b3b",
+  "inventory": {
+    "paths": 9,
+    "operations": 9,
+    "callbacks": 6,
+    "schemas": 53,
+    "security_schemes": 3,
+    "parameters": 6,
+    "local_references_validated": 142
+  },
+  "http": {
+    "http_status": 200,
+    "last_modified": "Wed, 15 Jul 2026 13:28:47 GMT",
+    "etag": "\"5fd9830347dadc97908070030c21f743\"",
+    "content_type": "text/html",
+    "final_url": "https://uberpay.uber.com/"
+  }
+}

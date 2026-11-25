@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "name": "fault_is_retryable_and_same_key_is_reprocessed",
+      "steps": [
+        {
+          "op": "let",
+          "values": {
+            "key": {
+              "uuid": true
+            }
+          }
+        },
+        {
+          "op": "with_sql_fault",
+          "table": "transactions",
+          "steps": [
+            {
+              "method": "POST",
+              "path": "/charge",
+              "fixture": "charge",
+              "set": {
+                "id": "${id}"
+              },
+              "request": {
+                "idem": "${key}"
+              },
+              "expect": {
+                "status": 500
+              }
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}"
+          },
+          "request": {
+            "idem": "${key}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "CONFIRMED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "parallel_duplicate_replay_retains_exact_result",
+      "steps": [
+        {
+          "op": "let",
+          "values": {
+            "key": {
+              "uuid": true
+            }
+          }
+        },
+        {
+          "op": "parallel",
+          "save": "results",
+          "branches": [
+            [
+              {
+                "method": "POST",
+                "path": "/charge",
+                "fixture": "charge",
+                "set": {
+                  "id": "${id}",
+                  "initiated_at": "2026-10-28T12:00:00Z"
+                },
+                "request": {
+                  "idem": "${key}"
+                },
+                "expect": {
+                  "status": 200
+                },
+                "bind": {
+                  "ref": "psp_reference"
+                }
+              }
+            ],
+            [
+              {
+                "method": "POST",
+                "path": "/charge",
+                "fixture": "charge",
+                "set": {
+                  "id": "${id}",
+                  "initiated_at": "2026-10-28T12:00:00Z"
+                },
+                "request": {
+                  "idem": "${key}"
+                },
+                "expect": {
+                  "status": 200
+                },
+                "bind": {
+                  "ref": "psp_reference"
+                }
+              }
+            ],
+            [
+              {
+                "method": "POST",
+                "path": "/charge",
+                "fixture": "charge",
+                "set": {
+                  "id": "${id}",
+                  "initiated_at": "2026-10-28T12:00:00Z"
+                },
+                "request": {
+                  "idem": "${key}"
+                },
+                "expect": {
+                  "status": 200
+                },
+                "bind": {
+                  "ref": "psp_reference"
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "op": "assert",
+          "equals": {
+            "results.1.ref": "${results.0.ref}",
+            "results.2.ref": "${results.0.ref}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "user_capability_survives_process_kill",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_WEBVIEW"
+          },
+          "expect": {
+            "status": 200
+          },
+          "bind": {
+            "url": "actions.0.url"
+          }
+        },
+        {
+          "op": "restart",
+          "hard": true
+        },
+        {
+          "op": "form",
+          "url": "${url}",
+          "save": "pay"
+        },
+        {
+          "op": "form_submit",
+          "form": "pay",
+          "fields": {
+            "decision": "approve"
+          },
+          "expect": {
+            "status": 302
+          }
+        },
+        {
+          "op": "callback",
+          "name": "chargeCallback",
+          "id": "${id}",
+          "body": {
+            "state.value": "CONFIRMED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refund_reversal_has_two_ordered_versions",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_REFUND_REVERSAL"
+          },
+          "expect": {
+            "status": 200
+          },
+          "bind": {
+            "ref": "psp_reference"
+          }
+        },
+        {
+          "op": "let",
+          "values": {
+            "refund": {
+              "uuid": true
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/refund",
+          "payload": {
+            "id": "${refund}",
+            "original_transaction_id": "${id}",
+            "original_merchant_reference": "${ref}",
+            "amount": {
+              "value": 1000000,
+              "currency": "BRL"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": {
+              "status": "PENDING"
+            }
+          }
+        },
+        {
+          "op": "callback",
+          "name": "updateRefund",
+          "id": "${refund}",
+          "index": 0,
+          "body": {
+            "status": "CONFIRMED"
+          }
+        },
+        {
+          "op": "callback",
+          "name": "updateRefund",
+          "id": "${refund}",
+          "index": 1,
+          "body": {
+            "status": "REJECTED"
+          }
+        }
+      ]
+    }
+  ]
+}

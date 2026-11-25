@@ -12,3 +12,14 @@ node_modules/
 .env
 public/
 coverage/
+
+# Local fake-money environment, keys, databases, build outputs and reports.
+.local/
+.venv/
+.artifacts/
+__pycache__/
+*.pyc
+implementations/node/dist/
+implementations/java/target/
+implementations/java/.mvn/apache-maven-*/
+implementations/go/psp

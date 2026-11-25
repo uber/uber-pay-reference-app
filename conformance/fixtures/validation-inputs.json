@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "profiles": {
+    "charge": {
+      "authorization": {
+        "type": "web_view_authorization"
+      },
+      "id": "$id",
+      "source": {
+        "type": "Account",
+        "id": "demo-settlement",
+        "owner_id": "demo-partner",
+        "name": "Synthetic settlement",
+        "uri": "//synthetic/source"
+      },
+      "destination": {
+        "type": "Account",
+        "id": "demo-customer",
+        "name": "Synthetic customer",
+        "owner_id": "synthetic-owner",
+        "uri": "//synthetic/destination"
+      },
+      "amount": {
+        "value": 1000000,
+        "currency": "BRL"
+      },
+      "description": "Synthetic conformance payment",
+      "country_iso2": "BR",
+      "funding_method": "DEMO_SYNC",
+      "initiated_at": "2026-01-01T00:00:00Z",
+      "return_url": "http://127.0.0.1:9090/return",
+      "capture_method": "AUTOMATIC",
+      "session_id": "synthetic-session",
+      "destination_owner": {
+        "type": "Customer",
+        "id": "synthetic-owner",
+        "uri": "//synthetic/owner",
+        "details": {
+          "mobile": "+5500000000000",
+          "firstname": "Demo",
+          "lastname": "User"
+        }
+      },
+      "payment_data": [
+        {
+          "type": "meal_voucher_payment_data",
+          "meal_voucher_merchant_id": "demo-merchant",
+          "meal_voucher_merchant_secret": "demo-merchant-secret"
+        },
+        {
+          "type": "point_conversion_payment_data",
+          "points_to_charge_e5": 1000000
+        },
+        {
+          "type": "order_payment_data",
+          "order_id": "synthetic-order"
+        }
+      ]
+    },
+    "capture": {
+      "psp_reference": "synthetic-ref",
+      "amount_to_capture": {
+        "value": 1000000,
+        "currency": "BRL"
+      }
+    },
+    "cancel": {
+      "psp_reference": "synthetic-ref"
+    },
+    "refund": {
+      "id": "synthetic-refund",
+      "original_transaction_id": "synthetic-charge",
+      "original_merchant_reference": "synthetic-ref",
+      "amount": {
+        "value": 1000000,
+        "currency": "BRL"
+      },
+      "description": "Synthetic refund",
+      "order_refund_data": "{\"order_id\":\"synthetic-order\"}"
+    },
+    "balance": {
+      "account_id": "demo-account",
+      "funding_method": "DEMO_SYNC",
+      "payment_data": [
+        {
+          "type": "meal_voucher_payment_data",
+          "meal_voucher_merchant_id": "demo-merchant",
+          "meal_voucher_merchant_secret": "demo-merchant-secret"
+        },
+        {
+          "type": "point_conversion_payment_data",
+          "points_to_charge_e5": 1000000
+        },
+        {
+          "type": "order_payment_data",
+          "order_id": "synthetic-order"
+        }
+      ]
+    },
+    "payout": {
+      "id": "$id",
+      "payer": {
+        "type": "Account",
+        "id": "demo-settlement",
+        "name": "Synthetic payer",
+        "owner_id": "synthetic-payer",
+        "uri": "//synthetic/payer"
+      },
+      "amount": {
+        "value": 100000,
+        "currency": "BRL"
+      },
+      "description": "Synthetic conformance payout",
+      "country_iso2": "BR",
+      "funding_method": "DEMO_SYNC",
+      "initiated_at": "2026-01-01T00:00:00Z",
+      "payee": {
+        "account": {
+          "type": "MOBILE_WALLET",
+          "account_id": "demo-account"
+        },
+        "name": "Synthetic payee",
+        "local_name": "Carteira sintética",
+        "date_of_birth": "2000-01-02",
+        "address": {
+          "address": "Synthetic street",
+          "state_province": "SP",
+          "city": "Synthetic city",
+          "post_code": "00000-000"
+        },
+        "document": {
+          "type": "RUT",
+          "id": "synthetic-document"
+        }
+      }
+    },
+    "token_code": {
+      "client_id": "synthetic-client",
+      "client_secret": "synthetic-secret",
+      "grant_type": "authorization_code",
+      "code": "synthetic-code",
+      "redirect_uri": "http://127.0.0.1:9090/return"
+    },
+    "token_refresh": {
+      "client_id": "synthetic-client",
+      "client_secret": "synthetic-secret",
+      "grant_type": "refresh_token",
+      "refresh_token": "synthetic-refresh"
+    },
+    "token_wallet": {
+      "client_id": "synthetic-client",
+      "client_secret": "synthetic-secret",
+      "grant_type": "urn:uberpay:params:oauth:grant-type:wallet-grant",
+      "scope": "charge get_balance offline_access refund",
+      "funding_method": "DEMO_SYNC",
+      "country_iso2": "BR",
+      "account_id": "demo-account",
+      "wallet_reference_data": {
+        "payment_identifier": "demo-account",
+        "display_name": "Synthetic wallet"
+      }
+    },
+    "charge_access_token": {
+      "authorization": {
+        "type": "access_token_authorization",
+        "account_id": "demo-account"
+      },
+      "id": "$id",
+      "source": {
+        "type": "Account",
+        "id": "demo-settlement",
+        "owner_id": "demo-partner",
+        "name": "Synthetic settlement",
+        "uri": "//synthetic/source"
+      },
+      "destination": {
+        "type": "Account",
+        "id": "demo-customer",
+        "name": "Synthetic customer",
+        "owner_id": "synthetic-owner",
+        "uri": "//synthetic/destination"
+      },
+      "amount": {
+        "value": 1000000,
+        "currency": "BRL"
+      },
+      "description": "Synthetic conformance payment",
+      "country_iso2": "BR",
+      "funding_method": "DEMO_SYNC",
+      "initiated_at": "2026-01-01T00:00:00Z",
+      "return_url": "http://127.0.0.1:9090/return",
+      "capture_method": "AUTOMATIC",
+      "session_id": "synthetic-session",
+      "destination_owner": {
+        "type": "Customer",
+        "id": "synthetic-owner",
+        "uri": "//synthetic/owner",
+        "details": {
+          "mobile": "+5500000000000",
+          "firstname": "Demo",
+          "lastname": "User"
+        }
+      },
+      "payment_data": [
+        {
+          "type": "meal_voucher_payment_data",
+          "meal_voucher_merchant_id": "demo-merchant",
+          "meal_voucher_merchant_secret": "demo-merchant-secret"
+        },
+        {
+          "type": "point_conversion_payment_data",
+          "points_to_charge_e5": 1000000
+        },
+        {
+          "type": "order_payment_data",
+          "order_id": "synthetic-order"
+        }
+      ]
+    }
+  },
+  "query_profiles": {
+    "authorize": {
+      "client_id": "synthetic-client",
+      "response_type": "code",
+      "redirect_uri": "http://127.0.0.1:9090/return",
+      "scope": "charge refund get_balance offline_access",
+      "state": "synthetic-state",
+      "authorization_details": "[{\"type\": \"authorization_detail\", \"funding_method\": \"DEMO_SYNC\", \"country_iso2\": \"BR\", \"locale\": \"en-US\", \"account_id\": \"demo-account\"}]"
+    },
+    "lookup": {
+      "id": "synthetic-charge",
+      "merchant_reference": "synthetic-ref"
+    }
+  }
+}
