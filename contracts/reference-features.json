@@ -1,0 +1,565 @@
+{
+  "version": 1,
+  "charge_reasons": [
+    "BANK_SOFT_ERROR",
+    "INSUFFICIENT_BALANCE",
+    "PAYMENT_FRAUD_ERROR",
+    "PAYMENT_NETWORK_ERROR",
+    "PAYMENT_PSP_ERROR",
+    "VALIDATION_ERROR",
+    "BANK_HARD_ERROR",
+    "PAYMENT_PSP_HARD_DECLINE_ERROR",
+    "INSTRUMENT_EXPIRED_HARD_ERROR",
+    "INVALID_PAYMENT_DETAILS_ERROR",
+    "USER_CANCELLED",
+    "MERCHANT_EXPIRED",
+    "MERCHANT_REJECTED",
+    "PAYMENT_ERROR"
+  ],
+  "payout_reasons": [
+    "VALIDATION_ERROR",
+    "INVALID_PAYMENT_DETAILS_ERROR",
+    "INSUFFICIENT_BALANCE",
+    "INACTIVE_ACCOUNT_ERROR",
+    "PAYMENT_PSP_HARD_DECLINE_ERROR",
+    "PAYMENT_FRAUD_ERROR",
+    "PAYMENT_ERROR",
+    "BANK_HARD_ERROR",
+    "MERCHANT_REJECTED",
+    "PAYMENT_PSP_ERROR"
+  ],
+  "methods": {
+    "DEMO_SYNC": {
+      "behavior": "sync",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT": {
+      "behavior": "reject",
+      "detail": "INSUFFICIENT_BALANCE",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_CAPTURE_HARD": {
+      "behavior": "capture_hard",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_CAPTURE_SOFT": {
+      "behavior": "capture_soft",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING": {
+      "behavior": "pending",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT": {
+      "behavior": "pending_reject",
+      "detail": "MERCHANT_REJECTED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_WEBVIEW": {
+      "behavior": "webview",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_QR": {
+      "behavior": "qr",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REFUND_REVERSAL": {
+      "behavior": "refund_reversal",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REFUND_PENDING_REJECT": {
+      "behavior": "refund_reject",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_MEAL_VOUCHER": {
+      "behavior": "sync",
+      "itemized": true,
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_DEPOSIT": {
+      "behavior": "webview",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "deposit",
+      "allow_amount_update": true
+    },
+    "DEMO_REJECT_BANK_SOFT_ERROR": {
+      "behavior": "reject",
+      "detail": "BANK_SOFT_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_BANK_SOFT_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "BANK_SOFT_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_INSUFFICIENT_BALANCE": {
+      "behavior": "reject",
+      "detail": "INSUFFICIENT_BALANCE",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_INSUFFICIENT_BALANCE": {
+      "behavior": "pending_reject",
+      "detail": "INSUFFICIENT_BALANCE",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_PAYMENT_FRAUD_ERROR": {
+      "behavior": "reject",
+      "detail": "PAYMENT_FRAUD_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_PAYMENT_FRAUD_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "PAYMENT_FRAUD_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_PAYMENT_NETWORK_ERROR": {
+      "behavior": "reject",
+      "detail": "PAYMENT_NETWORK_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_PAYMENT_NETWORK_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "PAYMENT_NETWORK_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_PAYMENT_PSP_ERROR": {
+      "behavior": "reject",
+      "detail": "PAYMENT_PSP_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_PAYMENT_PSP_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "PAYMENT_PSP_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_VALIDATION_ERROR": {
+      "behavior": "reject",
+      "detail": "VALIDATION_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_VALIDATION_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "VALIDATION_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_BANK_HARD_ERROR": {
+      "behavior": "reject",
+      "detail": "BANK_HARD_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_BANK_HARD_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "BANK_HARD_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_PAYMENT_PSP_HARD_DECLINE_ERROR": {
+      "behavior": "reject",
+      "detail": "PAYMENT_PSP_HARD_DECLINE_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_PAYMENT_PSP_HARD_DECLINE_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "PAYMENT_PSP_HARD_DECLINE_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_INSTRUMENT_EXPIRED_HARD_ERROR": {
+      "behavior": "reject",
+      "detail": "INSTRUMENT_EXPIRED_HARD_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_INSTRUMENT_EXPIRED_HARD_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "INSTRUMENT_EXPIRED_HARD_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_INVALID_PAYMENT_DETAILS_ERROR": {
+      "behavior": "reject",
+      "detail": "INVALID_PAYMENT_DETAILS_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_INVALID_PAYMENT_DETAILS_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "INVALID_PAYMENT_DETAILS_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_USER_CANCELLED": {
+      "behavior": "reject",
+      "detail": "USER_CANCELLED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_USER_CANCELLED": {
+      "behavior": "pending_reject",
+      "detail": "USER_CANCELLED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_MERCHANT_EXPIRED": {
+      "behavior": "reject",
+      "detail": "MERCHANT_EXPIRED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_MERCHANT_EXPIRED": {
+      "behavior": "pending_reject",
+      "detail": "MERCHANT_EXPIRED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_MERCHANT_REJECTED": {
+      "behavior": "reject",
+      "detail": "MERCHANT_REJECTED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_MERCHANT_REJECTED": {
+      "behavior": "pending_reject",
+      "detail": "MERCHANT_REJECTED",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_PAYMENT_ERROR": {
+      "behavior": "reject",
+      "detail": "PAYMENT_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_PAYMENT_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "PAYMENT_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REJECT_INACTIVE_ACCOUNT_ERROR": {
+      "behavior": "reject",
+      "detail": "INACTIVE_ACCOUNT_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_PENDING_REJECT_INACTIVE_ACCOUNT_ERROR": {
+      "behavior": "pending_reject",
+      "detail": "INACTIVE_ACCOUNT_ERROR",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REFUND_REJECT": {
+      "behavior": "refund_sync_reject",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_REFUND_SYNC_REVERSAL": {
+      "behavior": "refund_sync_reversal",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge"
+    },
+    "DEMO_POINTS": {
+      "behavior": "sync",
+      "countries": [
+        "BR"
+      ],
+      "currencies": [
+        "BRL"
+      ],
+      "callback_mode": "charge",
+      "points": true
+    }
+  },
+  "translations": {
+    "en-US": {
+      "consent_title": "Local wallet consent",
+      "payment_title": "Local synthetic payment",
+      "approve": "Approve",
+      "confirm": "Confirm",
+      "deny": "Deny",
+      "reject": "Reject",
+      "method": "Payment method",
+      "country": "Country",
+      "scopes": "Requested permissions",
+      "synthetic": "Synthetic funds only",
+      "invalid_request": "Invalid request",
+      "amount": "Amount (E5)",
+      "http_400": "Invalid request",
+      "http_401": "Authentication required",
+      "http_403": "Access denied",
+      "http_404": "Resource not found",
+      "http_409": "Request conflicts with the current state",
+      "http_422": "Payment could not be processed",
+      "http_429": "Too many requests",
+      "http_500": "Service temporarily unavailable"
+    },
+    "pt-BR": {
+      "consent_title": "Consentimento da carteira local",
+      "payment_title": "Pagamento simulado local",
+      "approve": "Autorizar",
+      "confirm": "Confirmar",
+      "deny": "Negar",
+      "reject": "Rejeitar",
+      "method": "Forma de pagamento",
+      "country": "País",
+      "scopes": "Permissões solicitadas",
+      "synthetic": "Somente saldo simulado",
+      "invalid_request": "Solicitação inválida",
+      "amount": "Valor (E5)",
+      "http_400": "Solicitação inválida",
+      "http_401": "Autenticação necessária",
+      "http_403": "Acesso negado",
+      "http_404": "Recurso não encontrado",
+      "http_409": "Conflito com o estado atual",
+      "http_422": "Não foi possível processar o pagamento",
+      "http_429": "Muitas solicitações",
+      "http_500": "Serviço temporariamente indisponível"
+    }
+  },
+  "policy_version": "2026-11-20-owner-decisions"
+}

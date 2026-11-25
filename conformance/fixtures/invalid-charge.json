@@ -1,0 +1,60 @@
+[
+  {
+    "name": "missing_amount",
+    "delete": "amount"
+  },
+  {
+    "name": "zero_amount",
+    "set": "amount.value",
+    "value": 0
+  },
+  {
+    "name": "negative_amount",
+    "set": "amount.value",
+    "value": -1
+  },
+  {
+    "name": "fraction_amount",
+    "set": "amount.value",
+    "value": 1.5
+  },
+  {
+    "name": "string_amount",
+    "set": "amount.value",
+    "value": "100000"
+  },
+  {
+    "name": "boolean_amount",
+    "set": "amount.value",
+    "value": true
+  },
+  {
+    "name": "int64_overflow",
+    "set": "amount.value",
+    "value": 9223372036854775808
+  },
+  {
+    "name": "invalid_currency_length",
+    "set": "amount.currency",
+    "value": "BR"
+  },
+  {
+    "name": "invalid_capture",
+    "set": "capture_method",
+    "value": "SOMETIME"
+  },
+  {
+    "name": "missing_authorization",
+    "delete": "authorization"
+  },
+  {
+    "name": "invalid_datetime",
+    "set": "initiated_at",
+    "value": "yesterday"
+  },
+  {
+    "name": "unknown_authorization",
+    "set": "authorization.type",
+    "value": "unknown"
+  }
+]

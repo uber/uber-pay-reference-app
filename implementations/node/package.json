@@ -1,0 +1,26 @@
+{
+  "name": "@uberpay/reference-node",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Native TypeScript PSP reference gateway; synthetic funds only",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "dev": "node --watch dist/main.js",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "express": "5.3.0",
+    "json-bigint": "1.0.0",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/json-bigint": "1.0.4",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.6",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,5 @@
+# CI runs a separate host-side PostgreSQL for the wire suite. The smoke gateway
+# connects to db:5432 on the Compose network and needs no database host port.
+services:
+  db:
+    ports: !reset []

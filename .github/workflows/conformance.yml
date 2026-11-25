@@ -1,0 +1,77 @@
+name: Native PSP contract parity
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [node, java, go]
+    services:
+      postgres:
+        image: postgres:17@sha256:cdbfb3de010ef603c29f10a5dfc79e023f66ad662ec6fddcda7130afe5d65e7b
+        env:
+          POSTGRES_USER: uberpay
+          POSTGRES_PASSWORD: uberpay
+          POSTGRES_DB: uberpay
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U uberpay -d uberpay"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: matrix.language == 'node'
+        with:
+          node-version: "24"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: matrix.language == 'go'
+        with:
+          go-version: "1.25"
+          cache-dependency-path: implementations/go/go.sum
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: make setup contract lint migration-check test-python
+      - if: matrix.language == 'node'
+        run: npm --prefix implementations/node ci --registry=https://registry.npmjs.org && make test-node
+      - if: matrix.language == 'go'
+        run: make test-go
+      - if: matrix.language == 'java'
+        run: make test-java
+      - run: make conformance LANGUAGE=${{ matrix.language }}
+      - name: Container clone-and-run smoke
+        env:
+          COMPOSE_FILE: "compose.yaml:compose.ci.yaml"
+        run: |
+          docker compose --profile ${{ matrix.language }} config --format json | python -c 'import json,sys; assert not json.load(sys.stdin)["services"]["db"].get("ports"), "Smoke DB must remain private to the Compose network"'
+          make up LANGUAGE=${{ matrix.language }}
+          python - <<'PYCODE'
+          import time, urllib.request
+          for attempt in range(90):
+              try:
+                  assert urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=2).status == 200
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Container gateway failed readiness')
+          PYCODE
+          make demo LANGUAGE=${{ matrix.language }}
+      - name: Stop smoke containers
+        if: always()
+        env:
+          COMPOSE_FILE: "compose.yaml:compose.ci.yaml"
+        run: make down
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: conformance-${{ matrix.language }}
+          path: .artifacts/conformance

@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "name": "automatic_charge_and_lookup",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "CONFIRMED"
+            }
+          },
+          "bind": {
+            "psp": "psp_reference"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "contract_path": "/find-transaction",
+          "expect": {
+            "status": 200,
+            "body": {
+              "id": "${id}",
+              "merchant_reference": "${psp}",
+              "status": "CONFIRMED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "manual_authorize_capture",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "capture_method": "MANUAL"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "CONFIRMED"
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "contract_path": "/find-transaction",
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "AUTHORIZED"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/charge/${id}/capture",
+          "contract_path": "/charge/{id}/capture",
+          "payload": {
+            "amount_to_capture": {
+              "value": 1000000,
+              "currency": "BRL"
+            }
+          },
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "contract_path": "/find-transaction",
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "CONFIRMED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pending_charge_with_callback_retry",
+      "callback_faults": {
+        "chargeCallback": [
+          503
+        ]
+      },
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "funding_method": "DEMO_PENDING"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "state.value": "PENDING"
+            }
+          },
+          "callback": {
+            "name": "chargeCallback",
+            "id": "${id}",
+            "body": {
+              "state.value": "CONFIRMED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "confirmed_charge_cancel_is_declared409",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}"
+          },
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/charge/${id}/cancel",
+          "contract_path": "/charge/{id}/cancel",
+          "payload": {},
+          "expect": {
+            "status": 409,
+            "body": {
+              "detail": "INVALID_CHARGE_STATE"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cancelled_lookup_returns_upstream_rejected",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/charge",
+          "fixture": "charge",
+          "set": {
+            "id": "${id}",
+            "capture_method": "MANUAL"
+          },
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/charge/${id}/cancel",
+          "contract_path": "/charge/{id}/cancel",
+          "payload": {},
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/find-transaction?id=${id}",
+          "contract_path": "/find-transaction",
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "REJECTED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "payout_id_conflict_uses_declared409",
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/payout",
+          "fixture": "payout",
+          "set": {
+            "id": "${id}"
+          },
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/payout",
+          "fixture": "payout",
+          "set": {
+            "id": "${id}",
+            "amount": {
+              "value": 100001,
+              "currency": "BRL"
+            }
+          },
+          "expect": {
+            "status": 409,
+            "body": {
+              "detail": "DUPLICATE_REQUEST_ERROR"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

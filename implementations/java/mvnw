@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+set -eu
+BASE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+VERSION=3.9.11
+MAVEN="$BASE/.mvn/apache-maven-$VERSION"
+if [ -n "${MAVEN_HOME:-}" ]; then MAVEN="$MAVEN_HOME"; fi
+if [ ! -x "$MAVEN/bin/mvn" ]; then
+  WORK=$(mktemp -d "$BASE/.mvn/bootstrap.XXXXXX")
+  ARCHIVE="$WORK/maven.tar.gz"
+  CHECKSUM="$WORK/maven.sha512"
+  cleanup() {
+    rm -f "$ARCHIVE" "$CHECKSUM"
+    rmdir "$WORK"
+  }
+  trap cleanup 0
+  URL="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$VERSION/apache-maven-$VERSION-bin.tar.gz"
+  download() {
+    curl --fail --silent --show-error --location \
+      --retry 5 --retry-max-time 180 --connect-timeout 10 --max-time 60 \
+      "$1" -o "$2"
+  }
+  download "$URL" "$ARCHIVE"
+  download "$URL.sha512" "$CHECKSUM"
+  EXPECTED=$(awk 'NR == 1 {print $1}' "$CHECKSUM")
+  ACTUAL=$(shasum -a 512 "$ARCHIVE" | awk '{print $1}')
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo 'Maven checksum mismatch' >&2; exit 1; }
+  tar -xzf "$ARCHIVE" -C "$BASE/.mvn"
+  cleanup
+  trap - 0
+fi
+exec "$MAVEN/bin/mvn" --settings "$BASE/.mvn/settings.xml" --file "$BASE/pom.xml" "$@"

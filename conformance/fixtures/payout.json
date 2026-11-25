@@ -1,0 +1,7 @@
+{
+  "id": "$id", "payer": {"type": "Account", "id": "demo-settlement", "name": "Synthetic payer"},
+  "amount": {"value": 100000, "currency": "BRL"},
+  "description": "Synthetic conformance payout", "country_iso2": "BR",
+  "funding_method": "DEMO_SYNC", "initiated_at": "$now",
+  "payee": {"account": {"type": "MOBILE_WALLET", "account_id": "demo-account"}, "name": "Synthetic payee"}
+}
