@@ -11,7 +11,7 @@ implementations/java/mvnw test package
 java -jar implementations/java/target/psp-reference-java-2.0.0.jar
 ```
 
-The Maven launcher verifies the pinned Maven distribution's SHA-512 before extracting it. Project-local Maven settings use public Maven Central rather than requiring Uber's internal artifact mirror. If Maven is already installed, set `MAVEN_HOME` to its directory.
+The Maven launcher uses bounded download retries and verifies the pinned Maven distribution's SHA-512 before extracting it. Failed downloads and checksum mismatches do not install Maven. Project-local Maven settings use public Maven Central rather than requiring Uber's internal artifact mirror. If Maven is already installed, set `MAVEN_HOME` to its directory.
 
 Use the root quickstart to generate development signing keys and start PostgreSQL / mock Uber. The gateway reads `contracts/implementation-profile.json`'s environment convention. `GET /health` checks actual database connectivity. No tokens, signatures, credentials, or request bodies are logged. Local diagnostic/test controls are disabled by default and require an explicit random secret when enabled.
 
