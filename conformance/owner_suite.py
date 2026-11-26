@@ -1,9 +1,10 @@
 """Acceptance evidence for decided U1-U15 reference policies, not Uber approval."""
 
-from datetime import timedelta, timezone
+from datetime import timedelta
 import json
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 
 import psycopg
 
@@ -13,6 +14,43 @@ from tools.settlement_sftp import SftpSink
 
 
 class OwnerSuite:
+    def test_owner_settlement_uses_database_clock_under_host_skew(self):
+        store = SettlementStore(self.database_url)
+        for offset in (timedelta(days=-1), timedelta(days=1)):
+            with self.subTest(host_offset=offset):
+                start = self.db_now()
+                source = "clock-" + self.uid()
+                charge, _ = self.charge(
+                    source=dict(type="Account", id=source, owner_id="synthetic-owner")
+                )
+                end = self.db_now()
+                window = SettlementWindow(start, end)
+                with patch("tools.settlement.datetime") as host_clock:
+                    host_clock.now.return_value = end + offset
+                    batch = store.seal(self.client_id, window)
+                    self.assertEqual(
+                        batch["manifest"],
+                        store.seal(self.client_id, window)["manifest"],
+                    )
+                    file = next(
+                        item
+                        for item in batch["files"]
+                        if item["source_account_id"] == source
+                    )
+                    self.assertEqual(
+                        [
+                            (entry["uber_id"], entry["amount_e5"])
+                            for entry in map(json.loads, file["content"].splitlines())
+                        ],
+                        [(charge["id"], "-1000000")],
+                    )
+                    if offset > timedelta(0):
+                        with self.assertRaisesRegex(ValueError, "open/future"):
+                            store.seal(
+                                self.client_id,
+                                SettlementWindow(end, end + timedelta(hours=1)),
+                            )
+
     def test_owner_partial_capture_http_releases_remainder_and_limits_refunds(self):
         with self.http_processor() as processor:
             invalid = self.fixture("charge")
@@ -206,12 +244,7 @@ class OwnerSuite:
             self.accepted("cancelDeposit", bad["id"])
 
     def test_owner_settlement_journal_seal_and_real_sftp_delivery(self):
-        with self.db() as db:
-            start = (
-                db.execute("SELECT clock_timestamp()")
-                .fetchone()[0]
-                .astimezone(timezone.utc)
-            )
+        start = self.db_now()
         source = "source-" + self.uid()
         with self.db() as db:
             db.execute(
@@ -249,12 +282,8 @@ class OwnerSuite:
             "/payout",
             200,
         )
+        end = self.db_now()
         with self.db() as db:
-            end = (
-                db.execute("SELECT clock_timestamp()")
-                .fetchone()[0]
-                .astimezone(timezone.utc)
-            )
             rows = db.execute(
                 "SELECT event_type,amount_e5 FROM settlement_entries WHERE client_id=%s AND source_account_id=%s ORDER BY occurred_at",
                 (self.client_id, source),

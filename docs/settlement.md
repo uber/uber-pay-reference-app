@@ -42,6 +42,9 @@ for old disposable demo state. There is no live financial migration in this proj
   producer/exclusive closer advisory-lock protocol prevents an in-flight earlier
   producer from slipping behind a sealed period. Event time is assigned by the
   database after taking the producer lock, not backdated by user input.
+  Closed-period validation and rendering use that same database clock, not the
+  export host's clock. Explicit test cutoffs must also come from PostgreSQL;
+  small host/VM clock differences must not omit entries or reject a closed period.
 
 ## Run a report
 
