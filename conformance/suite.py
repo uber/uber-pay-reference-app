@@ -53,6 +53,14 @@ class GatewaySuite(
     def uid(self):
         return uuid.uuid4().hex
 
+    def db_now(self):
+        with self.db() as db:
+            return (
+                db.execute("SELECT clock_timestamp()")
+                .fetchone()[0]
+                .astimezone(timezone.utc)
+            )
+
     def fixture(self, kind, **changes):
         text = (contract.ROOT / f"conformance/fixtures/{kind}.json").read_text()
         data = json.loads(

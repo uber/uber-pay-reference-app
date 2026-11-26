@@ -75,9 +75,9 @@ def group_by_source(transactions: Sequence[Mapping]) -> dict[str, list[Mapping]]
     return dict(groups)
 
 
-def render(client, window, rows):
-    """Pure, byte-deterministic format; no float money or spreadsheet formulas."""
-    window.validate()
+def render(client, window, rows, *, now=None):
+    """Deterministic format; database-backed sealing supplies its closure clock."""
+    window.validate(now)
     if len(rows) > MAX_ENTRIES:
         raise ValueError("Reference export limit exceeded; split the reporting period")
     batch_id = sha(canonical([FORMAT, client, utc(window.start), utc(window.end)]))
@@ -192,7 +192,6 @@ class SettlementStore:
     def seal(self, client, window):
         if not client:
             raise ValueError("Client required")
-        window.validate()
         with self.connect() as c:
             c.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
@@ -220,9 +219,8 @@ class SettlementStore:
                 ("settlement|" + client,),
             )
             try:
-                window.validate(
-                    c.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
-                )
+                now = c.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+                window.validate(now)
             finally:
                 c.execute(
                     "SELECT pg_advisory_unlock(hashtextextended(%s,0))",
@@ -232,7 +230,7 @@ class SettlementStore:
                 "SELECT * FROM settlement_entries WHERE client_id=%s AND occurred_at>=%s AND occurred_at<%s ORDER BY occurred_at,tx_kind,tx_id,event_type LIMIT %s",
                 (client, window.start, window.end, MAX_ENTRIES + 1),
             ).fetchall()
-            batch = render(client, window, rows)
+            batch = render(client, window, rows, now=now)
             c.execute(
                 "INSERT INTO settlement_batches(id,client_id,period_start,period_end,format_version,manifest,manifest_sha256) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                 (

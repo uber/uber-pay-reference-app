@@ -2,9 +2,8 @@
 
 import hashlib
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from urllib.parse import urlencode, urlsplit, parse_qs
 import psycopg
 from psycopg import sql
@@ -395,7 +394,7 @@ class FinalOwnerSuite:
         source = dict(
             type="Account", id="source-" + self.uid(), owner_id="synthetic-owner"
         )
-        start = datetime.now(timezone.utc)
+        start = self.db_now()
         pending, response = self.charge(funding_method="DEMO_PENDING", source=source)
         self.accepted("chargeCallback", pending["id"])
         self.assertEqual(
@@ -418,8 +417,7 @@ class FinalOwnerSuite:
             )
         other_source = dict(source, id="source-" + self.uid())
         self.charge(source=other_source)
-        end = datetime.now(timezone.utc)
-        time.sleep(0.002)
+        end = self.db_now()
         store = SettlementStore(self.database_url)
         window = SettlementWindow(start, end)
         with ThreadPoolExecutor(2) as pool:
@@ -456,7 +454,7 @@ class FinalOwnerSuite:
                 type="Account", id="barrier-" + self.uid(), owner_id="synthetic-owner"
             ),
         )
-        start = datetime.now(timezone.utc)
+        start = self.db_now()
         with self.db() as barrier, ThreadPoolExecutor(2) as pool:
             barrier.execute(
                 "SELECT pg_advisory_lock(hashtextextended(%s,0))",
@@ -477,7 +475,7 @@ class FinalOwnerSuite:
                 eventually(
                     waiting, description="producer waiting on settlement barrier"
                 )
-                boundary = datetime.now(timezone.utc)
+                boundary = self.db_now()
                 sealing = pool.submit(
                     SettlementStore(self.database_url).seal,
                     self.client_id,
