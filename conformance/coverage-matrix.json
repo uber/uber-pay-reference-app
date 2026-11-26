@@ -605,7 +605,8 @@
       "tests": [
         "test_owner_settlement_journal_seal_and_real_sftp_delivery",
         "test_owner2_settlement_lifecycles_and_concurrent_seals",
-        "test_owner2_settlement_closing_barrier_uses_commit_clock"
+        "test_owner2_settlement_closing_barrier_uses_commit_clock",
+        "test_owner_settlement_uses_database_clock_under_host_skew"
       ]
     }
   ],
